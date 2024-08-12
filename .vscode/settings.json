@@ -1,0 +1,4 @@
+{
+    "idf.portWin": "COM9",
+    "cmake.ignoreCMakeListsMissing": true
+}
