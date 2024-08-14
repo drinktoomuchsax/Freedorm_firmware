@@ -14,5 +14,6 @@
     "idf.portWin": "COM9",
     "idf.pythonBinPathWin": "c:\\Users\\Administrator\\.espressif\\python_env\\idf5.1_py3.11_env\\Scripts\\python.exe",
     "idf.toolsPathWin": "c:\\Users\\Administrator\\.espressif",
-    "idf.flashType": "UART"
+    "idf.flashType": "UART",
+    "C_Cpp.default.compilerPath": "C:\\Espressif\\tools\\riscv32-esp-elf\\esp-12.2.0_20230208\\riscv32-esp-elf\\bin\\riscv32-esp-elf-gcc.exe"
 }
