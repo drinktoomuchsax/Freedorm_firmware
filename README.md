@@ -2,7 +2,7 @@
 <div>
 <p align="center">
 <a href="https://freedorm.net" >
-  <img width="190" src="/readme/freedorm_mini_logo.png" alt="Freedorm Logo by Sun">
+  <img width="190" src="readme/freedorm_mini_logo.png" alt="Freedorm Logo by Sun">
 </a>
   </p>  
 <h1 align="center">
