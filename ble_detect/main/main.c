@@ -59,6 +59,14 @@ static int ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg);
 
 static uint8_t ble_prox_prph_addr_type;
 
+static uint16_t ble_prox_prph_conn_handle = -1;
+
+static void rssi_monitor_task(void *param);
+
+static void kill_the_connection_after_10s();
+
+static TaskHandle_t rssi_task_handle = NULL; // 全局变量存储任务句柄
+
 /**
  * Utility function to log an array of bytes.
  */
@@ -211,7 +219,9 @@ ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg)
         MODLOG_DFLT(INFO, "connection %s; status=%d\n",
                     event->connect.status == 0 ? "established" : "failed",
                     event->connect.status);
-
+        ble_prox_prph_conn_handle = event->connect.conn_handle;
+        xTaskCreate(rssi_monitor_task, "rssi_monitor_task", 2048, &ble_prox_prph_conn_handle, 5, &rssi_task_handle);
+        // xTaskCreate(kill_the_connection_after_10s, "kill_the_connection_after_10s", 2048, NULL, 5, NULL);
         /* resume advertising */
 #if CONFIG_EXAMPLE_EXTENDED_ADV
         ext_ble_prox_prph_advertise();
@@ -221,7 +231,8 @@ ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg)
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
-        MODLOG_DFLT(INFO, "disconnect; reason=%d\n", event->disconnect.reason);
+        MODLOG_DFLT(INFO, "disconnect; reason=%#04x\n", event->disconnect.reason);
+        vTaskDelete(rssi_task_handle);
 
         /* Connection terminated; resume advertising */
 #if CONFIG_EXAMPLE_EXTENDED_ADV
@@ -294,6 +305,38 @@ void ble_prox_prph_host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
+static void rssi_monitor_task(void *param)
+{
+    uint16_t conn_handle = *(uint16_t *)param; // 传递连接句柄
+    int8_t measured_rssi = 0;
+
+    while (1)
+    {
+        // 查询并打印 RSSI
+        ble_gap_conn_rssi(conn_handle, &measured_rssi);
+        MODLOG_DFLT(INFO, "For connection %d, RSSI: %d dBm\n", conn_handle, measured_rssi);
+
+        // 每隔1秒更新一次
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static void
+kill_the_connection_after_10s()
+{
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    int rc = ble_gap_terminate(ble_prox_prph_conn_handle, BLE_ERR_CONN_TERM_LOCAL);
+    if (rc == 0)
+    {
+        MODLOG_DFLT(INFO, "Successfully initiated disconnection\n");
+    }
+    else
+    {
+        MODLOG_DFLT(ERROR, "Failed to disconnect, error code: %d\n", rc);
+    }
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     int rc;
@@ -322,12 +365,13 @@ void app_main(void)
     ble_hs_cfg.reset_cb = ble_prox_prph_on_reset;
 
     /* Enable bonding */
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
     ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
-    ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    // ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    // ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
     ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_mitm = 1;
+    ble_hs_cfg.sm_mitm = 0;
 
     /* Set the default device name */
     rc = ble_svc_gap_device_name_set(device_name);

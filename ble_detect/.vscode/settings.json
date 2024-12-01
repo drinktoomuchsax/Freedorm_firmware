@@ -20,6 +20,10 @@
         "*.gcode": "gcode",
         "*.md": "markdown",
         "cstdint": "c",
-        "ble_svc_gap.h": "c"
-    }
+        "ble_svc_gap.h": "c",
+        "freertosconfig.h": "c",
+        "nimble_port.h": "c",
+        "syscfg.h": "c"
+    },
+    "idf.flashType": "UART"
 }
