@@ -51,6 +51,8 @@
 static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
 static bool send_volum_up = false;
+static esp_bd_addr_t connected_bd_addr; // 用于存储连接设备的地址
+
 #define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
@@ -171,6 +173,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         break;
     case ESP_GAP_BLE_AUTH_CMPL_EVT:
         sec_conn = true;
+        memcpy(connected_bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t)); // 保存连接设备地址
         esp_bd_addr_t bd_addr;
         memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
         ESP_LOGI(HID_DEMO_TAG, "remote BD_ADDR: %08x%04x",
@@ -178,11 +181,27 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                  (bd_addr[4] << 8) + bd_addr[5]);
         ESP_LOGI(HID_DEMO_TAG, "address type = %d", param->ble_security.auth_cmpl.addr_type);
         ESP_LOGI(HID_DEMO_TAG, "pair status = %s", param->ble_security.auth_cmpl.success ? "success" : "fail");
-        if (!param->ble_security.auth_cmpl.success)
+        if (param->ble_security.auth_cmpl.success)
+        {
+            esp_ble_gap_read_rssi(connected_bd_addr); // 读取 RSSI 值
+        }
+        else
         {
             ESP_LOGE(HID_DEMO_TAG, "fail reason = 0x%x", param->ble_security.auth_cmpl.fail_reason);
         }
         break;
+
+    case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT: // 处理读取 RSSI 的回调
+        if (param->read_rssi_cmpl.status == ESP_BT_STATUS_SUCCESS)
+        {
+            ESP_LOGI(HID_DEMO_TAG, "RSSI for connected device: %d", param->read_rssi_cmpl.rssi);
+        }
+        else
+        {
+            ESP_LOGE(HID_DEMO_TAG, "Failed to read RSSI, status: %d", param->read_rssi_cmpl.status);
+        }
+        break;
+
     default:
         break;
     }
@@ -193,28 +212,29 @@ void hid_demo_task(void *pvParameters)
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     while (1)
     {
-        // vTaskDelay(2000 / portTICK_PERIOD_MS);
-        // if (sec_conn)
-        // {
-        //     ESP_LOGI(HID_DEMO_TAG, "Send the volume");
-        //     send_volum_up = true;
-        //     // uint8_t key_vaule = {HID_KEY_A};
-        //     // esp_hidd_send_keyboard_value(hid_conn_id, 0, &key_vaule, 1);
-        //     esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, true);
-        //     vTaskDelay(3000 / portTICK_PERIOD_MS);
-        //     if (send_volum_up)
-        //     {
-        //         send_volum_up = false;
-        //         esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, false);
-        //         esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, true);
-        //         vTaskDelay(3000 / portTICK_PERIOD_MS);
-        //         esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, false);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        if (sec_conn)
+        {
+            ESP_LOGI(HID_DEMO_TAG, "Read RSSI value");
+            send_volum_up = true;
+            // uint8_t key_vaule = {HID_KEY_A};
+            // esp_hidd_send_keyboard_value(hid_conn_id, 0, &key_vaule, 1);
+            // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, true);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            if (send_volum_up)
+            {
+                esp_ble_gap_read_rssi(connected_bd_addr); // 读取 RSSI 值
+                send_volum_up = false;
+                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, false);
+                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, true);
+                // vTaskDelay(3000 / portTICK_PERIOD_MS);
+                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, false);
 
-        //         // send keyboard value "Hello Freedorm !"
-        //         uint8_t key_vaule[] = {HID_KEY_H, HID_KEY_E, HID_KEY_L, HID_KEY_L, HID_KEY_O, HID_KEY_SPACEBAR, HID_KEY_F, HID_KEY_R, HID_KEY_E, HID_KEY_E, HID_KEY_D, HID_KEY_O, HID_KEY_R, HID_KEY_M};
-        //         esp_hidd_send_keyboard_value(hid_conn_id, 0, key_vaule, sizeof(key_vaule));
-        //     }
-        // }
+                // // send keyboard value "Hello Freedorm !"
+                // uint8_t key_vaule[] = {HID_KEY_H, HID_KEY_E, HID_KEY_L, HID_KEY_L, HID_KEY_O, HID_KEY_SPACEBAR, HID_KEY_F, HID_KEY_R, HID_KEY_E, HID_KEY_E, HID_KEY_D, HID_KEY_O, HID_KEY_R, HID_KEY_M};
+                // esp_hidd_send_keyboard_value(hid_conn_id, 0, key_vaule, sizeof(key_vaule));
+            }
+        }
     }
 }
 
