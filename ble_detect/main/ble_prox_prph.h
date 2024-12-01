@@ -12,11 +12,12 @@
 #include "services/prox/ble_svc_prox.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-struct ble_hs_cfg;
-struct ble_gatt_register_ctxt;
+    struct ble_hs_cfg;
+    struct ble_gatt_register_ctxt;
 
 #ifdef __cplusplus
 }

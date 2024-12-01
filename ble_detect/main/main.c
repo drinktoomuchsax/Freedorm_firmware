@@ -18,15 +18,42 @@
 
 #if CONFIG_EXAMPLE_EXTENDED_ADV
 static uint8_t ext_adv_pattern_1[] = {
-    0x02, 0x01, 0x06,
-    0x03, 0x03, 0xab, 0xcd,
-    0x03, 0x03, 0x18, 0x03,
-    0x13, 0X09, 'n', 'i', 'm', 'b', 'l', 'e', '-', 'p', 'r', 'o', 'x', '-', 'p', 'r', 'p', 'h', '-', 'e',
+    0x02,
+    0x01,
+    0x06,
+    0x03,
+    0x03,
+    0xab,
+    0xcd,
+    0x03,
+    0x03,
+    0x18,
+    0x03,
+    0x13,
+    0X09,
+    'n',
+    'i',
+    'm',
+    'b',
+    'l',
+    'e',
+    '-',
+    'p',
+    'r',
+    'o',
+    'x',
+    '-',
+    'p',
+    'r',
+    'p',
+    'h',
+    '-',
+    'e',
 };
 #endif
 
 static const char *tag = "NimBLE_PROX_PRPH";
-static const char *device_name = "ble_prox_prph";
+static const char *device_name = "Freedorm Lite";
 
 static int ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg);
 
@@ -35,17 +62,16 @@ static uint8_t ble_prox_prph_addr_type;
 /**
  * Utility function to log an array of bytes.
  */
-void
-print_bytes(const uint8_t *bytes, int len)
+void print_bytes(const uint8_t *bytes, int len)
 {
     int i;
-    for (i = 0; i < len; i++) {
+    for (i = 0; i < len; i++)
+    {
         MODLOG_DFLT(INFO, "%s0x%02x", i != 0 ? ":" : "", bytes[i]);
     }
 }
 
-void
-print_addr(const void *addr)
+void print_addr(const void *addr)
 {
     const uint8_t *u8p;
 
@@ -69,12 +95,13 @@ ext_ble_prox_prph_advertise(void)
     int rc;
 
     /* First check if any instance is already active */
-    if (ble_gap_ext_adv_active(instance)) {
+    if (ble_gap_ext_adv_active(instance))
+    {
         return;
     }
 
     /* use defaults for non-set params */
-    memset (&params, 0, sizeof(params));
+    memset(&params, 0, sizeof(params));
 
     /* enable connectable advertising */
     params.connectable = 1;
@@ -92,7 +119,7 @@ ext_ble_prox_prph_advertise(void)
     /* configure instance 0 */
     rc = ble_gap_ext_adv_configure(instance, &params, NULL,
                                    ble_prox_prph_gap_event, NULL);
-    assert (rc == 0);
+    assert(rc == 0);
 
     /* in this case only scan response is allowed */
 
@@ -105,11 +132,11 @@ ext_ble_prox_prph_advertise(void)
     assert(rc == 0);
 
     rc = ble_gap_ext_adv_set_data(instance, data);
-    assert (rc == 0);
+    assert(rc == 0);
 
     /* start advertising */
     rc = ble_gap_ext_adv_start(instance, 0, 0);
-    assert (rc == 0);
+    assert(rc == 0);
 }
 #else
 
@@ -148,14 +175,14 @@ ble_prox_prph_advertise(void)
     fields.name_len = strlen(device_name);
     fields.name_is_complete = 1;
 
-    fields.uuids16 = (ble_uuid16_t[]) {
-        BLE_UUID16_INIT(BLE_SVC_LINK_LOSS_UUID16)
-    };
+    fields.uuids16 = (ble_uuid16_t[]){
+        BLE_UUID16_INIT(BLE_SVC_LINK_LOSS_UUID16)};
     fields.num_uuids16 = 1;
     fields.uuids16_is_complete = 1;
 
     rc = ble_gap_adv_set_fields(&fields);
-    if (rc != 0) {
+    if (rc != 0)
+    {
         MODLOG_DFLT(ERROR, "error setting advertisement data; rc=%d\n", rc);
         return;
     }
@@ -166,7 +193,8 @@ ble_prox_prph_advertise(void)
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     rc = ble_gap_adv_start(ble_prox_prph_addr_type, NULL, BLE_HS_FOREVER,
                            &adv_params, ble_prox_prph_gap_event, NULL);
-    if (rc != 0) {
+    if (rc != 0)
+    {
         MODLOG_DFLT(ERROR, "error enabling advertisement; rc=%d\n", rc);
         return;
     }
@@ -176,7 +204,8 @@ ble_prox_prph_advertise(void)
 static int
 ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg)
 {
-    switch (event->type) {
+    switch (event->type)
+    {
     case BLE_GAP_EVENT_CONNECT:
         /* A new connection was established or a connection attempt failed */
         MODLOG_DFLT(INFO, "connection %s; status=%d\n",
@@ -213,7 +242,7 @@ ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg)
 
     case BLE_GAP_EVENT_SUBSCRIBE:
         MODLOG_DFLT(INFO, "subscribe event; cur_notify=%d\n value handle; "
-                    "val_handle=%d\n",
+                          "val_handle=%d\n",
                     event->subscribe.cur_notify, event->subscribe.attr_handle);
         break;
 
@@ -222,7 +251,6 @@ ble_prox_prph_gap_event(struct ble_gap_event *event, void *arg)
                     event->mtu.conn_handle,
                     event->mtu.value);
         break;
-
     }
 
     return 0;
@@ -272,14 +300,16 @@ void app_main(void)
 
     /* Initialize NVS — it is used to store PHY calibration data */
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
     ret = nimble_port_init();
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         MODLOG_DFLT(ERROR, "Failed to init nimble %d \n", ret);
         return;
     }

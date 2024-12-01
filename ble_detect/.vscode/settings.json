@@ -15,5 +15,11 @@
     "idf.toolsPath": "/Users/sax/.espressif",
     "conventionalCommits.scopes": [
         "(ble)"
-    ]
+    ],
+    "files.associations": {
+        "*.gcode": "gcode",
+        "*.md": "markdown",
+        "cstdint": "c",
+        "ble_svc_gap.h": "c"
+    }
 }
