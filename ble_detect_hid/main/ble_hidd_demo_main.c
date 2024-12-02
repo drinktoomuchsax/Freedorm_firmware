@@ -19,6 +19,7 @@
 
 #include "esp_hidd_prf_api.h"
 #include "esp_bt_defs.h"
+#include "esp_mac.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_gatt_defs.h"
@@ -46,8 +47,15 @@
  * if you got `GATT_INSUF_ENCRYPTION` error, please ignore.
  */
 
-#define HID_DEMO_TAG "Freedorm"
+#define HID_DEMO_TAG "HID_DEMO"
+#define GATT_TAG "GATT_SERVICE"
 
+#define GATTS_SERVICE_UUID 0x00FF
+#define GATTS_CHAR_UUID 0xFF01
+#define GATTS_NUM_HANDLE 4 // 服务句柄数量, 服务句柄、特征句柄、描述符句柄、描述符配置句柄, 4个句柄
+
+static uint8_t gatt_char_value[64] = "Default_GATT_Value";
+static uint16_t gatt_handle_table[GATTS_NUM_HANDLE];
 static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
 static bool send_volum_up = false;
@@ -92,7 +100,7 @@ static esp_ble_adv_data_t hidd_adv_data = {
     .p_service_data = NULL,
     .service_uuid_len = sizeof(hidd_service_uuid128),
     .p_service_uuid = hidd_service_uuid128,
-    .flag = 0x6,
+    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT), // Always set the discoverable mode and BLE only
 };
 
 static esp_ble_adv_params_t hidd_adv_params = {
@@ -105,6 +113,39 @@ static esp_ble_adv_params_t hidd_adv_params = {
     .channel_map = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
+
+// 自定义 GATT 服务事件处理
+static void gatt_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
+    switch (event)
+    {
+    case ESP_GATTS_REG_EVT:
+        ESP_LOGI(GATT_TAG, "ESP_GATTS_REG_EVT, app_id %d", param->reg.app_id);
+        esp_ble_gatts_create_service(gatts_if, &(esp_gatt_srvc_id_t){.is_primary = true, .id.inst_id = 0, .id.uuid.len = ESP_UUID_LEN_16, .id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID}, GATTS_NUM_HANDLE);
+        break;
+
+    case ESP_GATTS_CREATE_EVT:
+        ESP_LOGI(GATT_TAG, "ESP_GATTS_CREATE_EVT, status %d", param->create.status);
+        gatt_handle_table[0] = param->create.service_handle;
+        esp_ble_gatts_start_service(gatt_handle_table[0]);
+        esp_ble_gatts_add_char(gatt_handle_table[0], &(esp_bt_uuid_t){.len = ESP_UUID_LEN_16, .uuid.uuid16 = GATTS_CHAR_UUID}, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                               ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE, NULL, NULL);
+        break;
+
+    case ESP_GATTS_WRITE_EVT:
+        ESP_LOGI(GATT_TAG, "ESP_GATTS_WRITE_EVT, handle = %d", param->write.handle);
+        if (param->write.handle == gatt_handle_table[1])
+        {
+            memset(gatt_char_value, 0, sizeof(gatt_char_value));
+            memcpy(gatt_char_value, param->write.value, param->write.len);
+            ESP_LOGI(GATT_TAG, "GATT Write: %s", gatt_char_value);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
 {
@@ -287,9 +328,14 @@ void app_main(void)
         ESP_LOGE(HID_DEMO_TAG, "%s init bluedroid failed", __func__);
     }
 
+    if ((ret = esp_ble_gatts_app_register(0)) != ESP_OK)
+    {
+        ESP_LOGE(HID_DEMO_TAG, "%s init bluedroid failed", __func__);
+    }
     /// register the callback function to the gap module
     esp_ble_gap_register_callback(gap_event_handler);
     esp_hidd_register_callbacks(hidd_event_callback);
+    esp_ble_gatts_register_callback(gatt_event_handler);
 
     /* set the security iocap & auth_req & key size & init key response key parameters to the stack*/
     esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND; // bonding with peer device after authentication
