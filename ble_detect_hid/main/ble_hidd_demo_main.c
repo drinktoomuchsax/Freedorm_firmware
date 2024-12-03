@@ -66,8 +66,6 @@ static esp_bd_addr_t connected_bd_addr; // 用于存储连接设备的地址
 
 #define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
 
-static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
-
 #define HIDD_DEVICE_NAME "Freedorm Lite"
 static uint8_t hidd_service_uuid128[] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
@@ -134,27 +132,34 @@ static esp_bd_addr_t connected_bd_addr;
 static SemaphoreHandle_t pairing_semaphore;
 
 #define PAIRING_BUTTON_GPIO GPIO_NUM_0 // 修改为您的按键GPIO编号
-#define OUTPUT_LED GPIO_NUM_12
+#define OUTPUT_LED_D4 GPIO_NUM_12
+#define OUTPUT_LED_D5 GPIO_NUM_13
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void pairing_mode_task(void *arg);
 
+static uint32_t led_state_mask = 0; // 位图，记录每个 GPIO 的当前状态
+
 void flip_led(int gpio_num)
 {
-    // verify the gpio is in the gpio_num_t
     if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
     {
-        ESP_LOGE(HID_DEMO_TAG, "Invalid GPIO number");
+        ESP_LOGE("LED_FLIP", "Invalid GPIO number");
         return;
     }
 
-    ESP_LOGI("LED_FLIP", "Toggling GPIO %d", gpio_num);
-    ESP_LOGI("LED_FLIP", "Current GPIO %d level: %d", gpio_num, gpio_get_level(gpio_num));
-
-    gpio_get_level(gpio_num) ? gpio_set_level(gpio_num, 0) : gpio_set_level(gpio_num, 1);
-
-    ESP_LOGI("LED_FLIP", "New GPIO %d level: %d", gpio_num, gpio_get_level(gpio_num));
+    // 检查当前状态并翻转
+    if (led_state_mask & (1 << gpio_num))
+    {
+        gpio_set_level(gpio_num, 0);
+        led_state_mask &= ~(1 << gpio_num); // 清除该位
+    }
+    else
+    {
+        gpio_set_level(gpio_num, 1);
+        led_state_mask |= (1 << gpio_num); // 设置该位
+    }
 }
 
 uint8_t read_button_GPIO(uint8_t button_id)
@@ -175,13 +180,15 @@ void button_task(void *arg)
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(HID_DEMO_TAG, "Single click detected");
-    flip_led(OUTPUT_LED); // 翻转 LED 状态
+    flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
     // 进入配对模式
 }
 
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
 {
     ESP_LOGI(HID_DEMO_TAG, "Long press hold detected");
+    flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
+
     // pairing_mode = true;
     // xSemaphoreGive(pairing_semaphore);
     // 长按启动后的逻辑
@@ -524,20 +531,22 @@ void app_main(void)
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
     // 按键初始化
-    gpio_config_t input_io_conf = {};
-    input_io_conf.intr_type = GPIO_INTR_POSEDGE;
-    input_io_conf.mode = GPIO_MODE_INPUT;
-    input_io_conf.pin_bit_mask = (1ULL << PAIRING_BUTTON_GPIO);
-    input_io_conf.pull_up_en = 1;
+    gpio_config_t input_io_conf = {
+        .pin_bit_mask = (1ULL << PAIRING_BUTTON_GPIO), // 配置 GPIO0 为输入
+        .mode = GPIO_MODE_INPUT,                       // 输入模式
+        .pull_up_en = GPIO_PULLUP_DISABLE,             // 上拉
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,          // 不需要下拉
+        .intr_type = GPIO_INTR_DISABLE                 // 不需要中断
+    };
     gpio_config(&input_io_conf);
 
     // 当按下GPIO0时，使GPIO IO12 的 LED亮起
     gpio_config_t output_io_conf = {
-        .pin_bit_mask = (1ULL << OUTPUT_LED),  // 配置 GPIO2 为输出
-        .mode = GPIO_MODE_OUTPUT,              // 输出模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,     // 不需要上拉
-        .pull_down_en = GPIO_PULLDOWN_DISABLE, // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE         // 不需要中断
+        .pin_bit_mask = (1ULL << OUTPUT_LED_D4 | 1ULL << OUTPUT_LED_D5), // 配置 GPIO2 为输出
+        .mode = GPIO_MODE_OUTPUT,                                        // 输出模式
+        .pull_up_en = GPIO_PULLUP_DISABLE,                               // 不需要上拉
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,                           // 不需要下拉
+        .intr_type = GPIO_INTR_DISABLE                                   // 不需要中断
     };
     gpio_config(&output_io_conf);
 
