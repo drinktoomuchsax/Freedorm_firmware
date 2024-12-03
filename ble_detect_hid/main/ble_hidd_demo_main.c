@@ -184,6 +184,18 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
     // 进入配对模式
 }
 
+void BTN1_DOUBLE_CLICK_Handler(void *btn)
+{
+    ESP_LOGI(HID_DEMO_TAG, "Double click detected");
+    for (int i = 0; i < 10; i++)
+    {
+        flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
 {
     ESP_LOGI(HID_DEMO_TAG, "Long press hold detected");
@@ -554,7 +566,8 @@ void app_main(void)
     button_init(&btn1, read_button_GPIO, 1, 0); // 第三个参数为有效电平 0（低电平有效），第四个参数为按键 ID 艹，tmd debug半天结果是这里参考电平的问题，艹
 
     button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
-    button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_HOLD_Handler);
+    button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
+    button_attach(&btn1, LONG_PRESS_HOLD, BTN1_LONG_PRESS_HOLD_Handler);
     button_start(&btn1);
 
     xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);
