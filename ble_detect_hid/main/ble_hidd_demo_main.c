@@ -150,13 +150,17 @@ void flip_led(int gpio_num)
     }
 
     ESP_LOGI("LED_FLIP", "Toggling GPIO %d", gpio_num);
+    ESP_LOGI("LED_FLIP", "Current GPIO %d level: %d", gpio_num, gpio_get_level(gpio_num));
 
-    gpio_get_level(gpio_num) ? gpio_set_level(gpio_num, 1) : gpio_set_level(gpio_num, 0);
+    gpio_get_level(gpio_num) ? gpio_set_level(gpio_num, 0) : gpio_set_level(gpio_num, 1);
+
+    ESP_LOGI("LED_FLIP", "New GPIO %d level: %d", gpio_num, gpio_get_level(gpio_num));
 }
 
 uint8_t read_button_GPIO(uint8_t button_id)
 {
-    return gpio_get_level(PAIRING_BUTTON_GPIO); // 读取按键 GPIO 状态
+    // ESP_LOGI(HID_DEMO_TAG, "Reading GPIO %d ,LEVEL: %d", PAIRING_BUTTON_GPIO, gpio_get_level(PAIRING_BUTTON_GPIO));
+    return gpio_get_level(PAIRING_BUTTON_GPIO);
 }
 
 void button_task(void *arg)
@@ -178,8 +182,8 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
 {
     ESP_LOGI(HID_DEMO_TAG, "Long press hold detected");
-    pairing_mode = true;
-    xSemaphoreGive(pairing_semaphore);
+    // pairing_mode = true;
+    // xSemaphoreGive(pairing_semaphore);
     // 长按启动后的逻辑
 }
 
@@ -521,7 +525,7 @@ void app_main(void)
 
     // 按键初始化
     gpio_config_t input_io_conf = {};
-    input_io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    input_io_conf.intr_type = GPIO_INTR_POSEDGE;
     input_io_conf.mode = GPIO_MODE_INPUT;
     input_io_conf.pin_bit_mask = (1ULL << PAIRING_BUTTON_GPIO);
     input_io_conf.pull_up_en = 1;
@@ -544,7 +548,7 @@ void app_main(void)
     button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_HOLD_Handler);
     button_start(&btn1);
 
-    xTaskCreate(&button_task, "button_task", 2048, NULL, 4, NULL);
+    xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);
 
     pairing_semaphore = xSemaphoreCreateBinary();
     xTaskCreate(&pairing_mode_task, "pairing_mode_task", 2048, NULL, 5, NULL);
