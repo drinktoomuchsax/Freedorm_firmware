@@ -28,6 +28,9 @@
 #include "driver/gpio.h"
 #include "hid_dev.h"
 
+#include "esp_task_wdt.h"
+#include "multi_button.h"
+
 /**
  * Brief:
  * This example Implemented BLE HID device profile related functions, in which the HID device
@@ -87,6 +90,10 @@ static uint8_t hidd_service_uuid128[] = {
     0x00,
 };
 
+#define BUTTON1_ID 0
+
+struct Button btn1;
+
 static esp_ble_adv_data_t hidd_adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
@@ -133,6 +140,49 @@ static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void pairing_mode_task(void *arg);
 
+void flip_led(int gpio_num)
+{
+    // verify the gpio is in the gpio_num_t
+    if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
+    {
+        ESP_LOGE(HID_DEMO_TAG, "Invalid GPIO number");
+        return;
+    }
+
+    ESP_LOGI("LED_FLIP", "Toggling GPIO %d", gpio_num);
+
+    gpio_get_level(gpio_num) ? gpio_set_level(gpio_num, 1) : gpio_set_level(gpio_num, 0);
+}
+
+uint8_t read_button_GPIO(uint8_t button_id)
+{
+    return gpio_get_level(PAIRING_BUTTON_GPIO); // 读取按键 GPIO 状态
+}
+
+void button_task(void *arg)
+{
+    while (1)
+    {
+        button_ticks();                // 按键状态检测
+        vTaskDelay(pdMS_TO_TICKS(10)); // 每 5 毫秒调用一次
+    }
+}
+
+void BTN1_SINGLE_CLICK_Handler(void *btn)
+{
+    ESP_LOGI(HID_DEMO_TAG, "Single click detected");
+    flip_led(OUTPUT_LED); // 翻转 LED 状态
+    // 进入配对模式
+}
+
+void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
+{
+    ESP_LOGI(HID_DEMO_TAG, "Long press hold detected");
+    pairing_mode = true;
+    xSemaphoreGive(pairing_semaphore);
+    // 长按启动后的逻辑
+}
+
 /* 加载白名单 */
 esp_err_t load_whitelist_from_nvs(whitelist_t *list)
 {
@@ -173,15 +223,23 @@ esp_err_t save_whitelist_to_nvs(whitelist_t *list)
     return err;
 }
 
-/* 按键中断处理函数 */
-void IRAM_ATTR pairing_button_isr_handler(void *arg)
+esp_err_t delete_whitelist_from_nvs()
 {
-    pairing_mode = true;
-    xSemaphoreGiveFromISR(pairing_semaphore, NULL);
-    // 使用GPIO输出指示灯
-    gpio_set_level(OUTPUT_LED, 1);
-}
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+        return err;
 
+    err = nvs_erase_key(nvs_handle, "whitelist");
+    if (err != ESP_OK)
+    {
+        nvs_close(nvs_handle);
+        return err;
+    }
+    err = nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    return err;
+}
 /* 配对模式任务 */
 void pairing_mode_task(void *arg)
 {
@@ -197,7 +255,7 @@ void pairing_mode_task(void *arg)
             esp_ble_gap_stop_advertising();
             esp_ble_gap_start_advertising(&hidd_adv_params);
             // 配对模式持续60秒
-            vTaskDelay(600000 / portTICK_PERIOD_MS);
+            vTaskDelay(6000 / portTICK_PERIOD_MS);
             // 退出配对模式
             pairing_mode = false;
             ESP_LOGI(HID_DEMO_TAG, "Exiting pairing mode");
@@ -479,9 +537,14 @@ void app_main(void)
     };
     gpio_config(&output_io_conf);
 
-    // 安装GPIO中断服务
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(PAIRING_BUTTON_GPIO, pairing_button_isr_handler, NULL);
+    // 初始化按键对象
+    button_init(&btn1, read_button_GPIO, 1, 0); // 第三个参数为有效电平 0（低电平有效），第四个参数为按键 ID 艹，tmd debug半天结果是这里参考电平的问题，艹
+
+    button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
+    button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_HOLD_Handler);
+    button_start(&btn1);
+
+    xTaskCreate(&button_task, "button_task", 2048, NULL, 4, NULL);
 
     pairing_semaphore = xSemaphoreCreateBinary();
     xTaskCreate(&pairing_mode_task, "pairing_mode_task", 2048, NULL, 5, NULL);
