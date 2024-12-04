@@ -27,6 +27,9 @@
         "esp_log.h": "c",
         "gpio.h": "c",
         "string.h": "c",
-        "multi_button.h": "c"
+        "multi_button.h": "c",
+        "ble_module.h": "c",
+        "esp_bt_main.h": "c",
+        "esp_task_wdt.h": "c"
     }
 }

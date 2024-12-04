@@ -1,12 +1,6 @@
 idf_component_register(SRCS     "_freedorm_main.c"
-                                "esp_hidd_prf_api.c"
-                                "hid_dev.c"
-                                "hid_device_le_prf.c"
-                                "./bsp_ble/ble_module.c"        # 添加外部库源文件
                     INCLUDE_DIRS "."
-                                 "./bsp_ble"
-                    
-                    REQUIRES bsp_button
+                    REQUIRES bsp_button bsp_ble
                     PRIV_REQUIRES   freertos
                                     esp_system
                                     esp_wifi

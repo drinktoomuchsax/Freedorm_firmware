@@ -1,3 +1,6 @@
+#ifndef BUTTON_H
+#define BUTTON_H
+
 #include <stdlib.h>
 
 #define PAIRING_BUTTON_GPIO GPIO_NUM_0 // 修改为您的按键GPIO编号
@@ -13,3 +16,5 @@ void button_task(void *arg);
 void BTN1_SINGLE_CLICK_Handler(void *btn);
 void BTN1_DOUBLE_CLICK_Handler(void *btn);
 void BTN1_LONG_PRESS_START_Handler(void *btn);
+
+#endif
