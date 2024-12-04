@@ -30,6 +30,7 @@
 
 #include "esp_task_wdt.h"
 #include "multi_button.h"
+#include "button.h"
 
 /**
  * Brief:
@@ -131,80 +132,9 @@ static bool pairing_mode = false;
 static esp_bd_addr_t connected_bd_addr;
 static SemaphoreHandle_t pairing_semaphore;
 
-#define PAIRING_BUTTON_GPIO GPIO_NUM_0 // 修改为您的按键GPIO编号
-#define OUTPUT_LED_D4 GPIO_NUM_12
-#define OUTPUT_LED_D5 GPIO_NUM_13
-
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void pairing_mode_task(void *arg);
-
-static uint32_t led_state_mask = 0; // 位图，记录每个 GPIO 的当前状态
-
-void flip_led(int gpio_num)
-{
-    if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
-    {
-        ESP_LOGE("LED_FLIP", "Invalid GPIO number");
-        return;
-    }
-
-    // 检查当前状态并翻转
-    if (led_state_mask & (1 << gpio_num))
-    {
-        gpio_set_level(gpio_num, 0);
-        led_state_mask &= ~(1 << gpio_num); // 清除该位
-    }
-    else
-    {
-        gpio_set_level(gpio_num, 1);
-        led_state_mask |= (1 << gpio_num); // 设置该位
-    }
-}
-
-uint8_t read_button_GPIO(uint8_t button_id)
-{
-    // ESP_LOGI(HID_DEMO_TAG, "Reading GPIO %d ,LEVEL: %d", PAIRING_BUTTON_GPIO, gpio_get_level(PAIRING_BUTTON_GPIO));
-    return gpio_get_level(PAIRING_BUTTON_GPIO);
-}
-
-void button_task(void *arg)
-{
-    while (1)
-    {
-        button_ticks();                // 按键状态检测
-        vTaskDelay(pdMS_TO_TICKS(10)); // 每 5 毫秒调用一次
-    }
-}
-
-void BTN1_SINGLE_CLICK_Handler(void *btn)
-{
-    ESP_LOGI(HID_DEMO_TAG, "Single click detected");
-    flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
-    // 进入配对模式
-}
-
-void BTN1_DOUBLE_CLICK_Handler(void *btn)
-{
-    ESP_LOGI(HID_DEMO_TAG, "Double click detected");
-    for (int i = 0; i < 10; i++)
-    {
-        flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-        flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-}
-
-void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
-{
-    ESP_LOGI(HID_DEMO_TAG, "Long press hold detected");
-    flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
-
-    // pairing_mode = true;
-    // xSemaphoreGive(pairing_semaphore);
-    // 长按启动后的逻辑
-}
 
 /* 加载白名单 */
 esp_err_t load_whitelist_from_nvs(whitelist_t *list)
@@ -263,6 +193,7 @@ esp_err_t delete_whitelist_from_nvs()
     nvs_close(nvs_handle);
     return err;
 }
+
 /* 配对模式任务 */
 void pairing_mode_task(void *arg)
 {
@@ -567,7 +498,7 @@ void app_main(void)
 
     button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
     button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
-    button_attach(&btn1, LONG_PRESS_HOLD, BTN1_LONG_PRESS_HOLD_Handler);
+    button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_START_Handler);
     button_start(&btn1);
 
     xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);

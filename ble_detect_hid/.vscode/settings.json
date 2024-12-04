@@ -19,5 +19,12 @@
         "key_switch",
         "led",
         "ble",
-    ]
+    ],
+    "files.associations": {
+        "*.gcode": "gcode",
+        "*.md": "markdown",
+        "led.h": "c",
+        "esp_log.h": "c",
+        "gpio.h": "c"
+    }
 }
