@@ -3,7 +3,9 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "multi_button.h"
+#include "esp_mac.h"
 
 void flip_led(int gpio_num)
 {
@@ -64,7 +66,6 @@ void BTN1_LONG_PRESS_START_Handler(void *btn)
     ESP_LOGI(LED_TAG, "Long press hold detected");
     flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
 
-    // pairing_mode = true;
+    ESP_LOGI(LED_TAG, "Long press detected, entering pairing mode.");
     // xSemaphoreGive(pairing_semaphore);
-    // 长按启动后的逻辑
 }

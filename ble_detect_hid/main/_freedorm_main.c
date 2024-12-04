@@ -203,17 +203,21 @@ void pairing_mode_task(void *arg)
         {
             // 进入配对模式
             pairing_mode = true;
-            ESP_LOGI(HID_DEMO_TAG, "Entering pairing mode");
-            // 设置广播参数，允许所有设备连接
+            ESP_LOGI(HID_DEMO_TAG, "Entering pairing mode.");
+
+            // 设置广播参数允许所有设备连接
             hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
             esp_ble_gap_stop_advertising();
             esp_ble_gap_start_advertising(&hidd_adv_params);
+
             // 配对模式持续60秒
-            vTaskDelay(6000 / portTICK_PERIOD_MS);
+            vTaskDelay(60000 / portTICK_PERIOD_MS);
+
             // 退出配对模式
             pairing_mode = false;
-            ESP_LOGI(HID_DEMO_TAG, "Exiting pairing mode");
-            // 设置广播参数，只允许白名单设备连接
+            ESP_LOGI(HID_DEMO_TAG, "Exiting pairing mode.");
+
+            // 恢复广播参数为只允许白名单设备连接
             hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
             esp_ble_gap_stop_advertising();
             esp_ble_gap_start_advertising(&hidd_adv_params);
@@ -287,55 +291,45 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         break;
     case ESP_GAP_BLE_AUTH_CMPL_EVT:
         sec_conn = true;
-        memcpy(connected_bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t)); // 保存连接设备地址
-        esp_bd_addr_t bd_addr;
-        memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
-        ESP_LOGI(HID_DEMO_TAG, "remote BD_ADDR: %08x%04x",
-                 (bd_addr[0] << 24) + (bd_addr[1] << 16) + (bd_addr[2] << 8) + bd_addr[3],
-                 (bd_addr[4] << 8) + bd_addr[5]);
-        ESP_LOGI(HID_DEMO_TAG, "address type = %d", param->ble_security.auth_cmpl.addr_type);
-        ESP_LOGI(HID_DEMO_TAG, "pair status = %s", param->ble_security.auth_cmpl.success ? "success" : "fail");
-        if (param->ble_security.auth_cmpl.success)
+        memcpy(connected_bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
+        ESP_LOGI(HID_DEMO_TAG, "Device authenticated: %08x%04x",
+                 (connected_bd_addr[0] << 24) + (connected_bd_addr[1] << 16) + (connected_bd_addr[2] << 8) + connected_bd_addr[3],
+                 (connected_bd_addr[4] << 8) + connected_bd_addr[5]);
+
+        // 检查设备是否已在白名单中
+        bool device_in_whitelist = false;
+        for (int i = 0; i < whitelist.num_devices; i++)
         {
-            memcpy(connected_bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t)); // 保存连接设备地址
-            // 检查设备是否已在白名单中
-            bool device_in_whitelist = false;
-            for (int i = 0; i < whitelist.num_devices; i++)
+            if (memcmp(whitelist.devices[i], connected_bd_addr, sizeof(esp_bd_addr_t)) == 0)
             {
-                if (memcmp(whitelist.devices[i], connected_bd_addr, sizeof(esp_bd_addr_t)) == 0)
-                {
-                    device_in_whitelist = true;
-                    break;
-                }
+                device_in_whitelist = true;
+                break;
             }
-            if (!device_in_whitelist)
-            {
-                if (whitelist.num_devices < MAX_WHITELIST_SIZE)
-                {
-                    memcpy(whitelist.devices[whitelist.num_devices], connected_bd_addr, sizeof(esp_bd_addr_t));
-                    whitelist.num_devices++;
-                    save_whitelist_to_nvs(&whitelist);
-                    // 添加设备到控制器的白名单
-                    esp_ble_gap_update_whitelist(true, connected_bd_addr, BLE_WL_ADDR_TYPE_PUBLIC);
-                    ESP_LOGI(HID_DEMO_TAG, "Device added to whitelist");
-                }
-                else
-                {
-                    ESP_LOGW(HID_DEMO_TAG, "Whitelist is full");
-                }
-            }
-            // 如果不在配对模式，修改广播参数为只允许白名单设备
-            if (!pairing_mode)
-            {
-                hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
-                esp_ble_gap_stop_advertising();
-                esp_ble_gap_start_advertising(&hidd_adv_params);
-            }
-            esp_ble_gap_read_rssi(connected_bd_addr); // 读取 RSSI 值
         }
-        else
+
+        // 如果设备不在白名单，添加并保存
+        if (!device_in_whitelist)
         {
-            ESP_LOGE(HID_DEMO_TAG, "Authentication failed, reason: 0x%x", param->ble_security.auth_cmpl.fail_reason);
+            if (whitelist.num_devices < MAX_WHITELIST_SIZE)
+            {
+                memcpy(whitelist.devices[whitelist.num_devices], connected_bd_addr, sizeof(esp_bd_addr_t));
+                whitelist.num_devices++;
+                save_whitelist_to_nvs(&whitelist);
+                esp_ble_gap_update_whitelist(true, connected_bd_addr, BLE_WL_ADDR_TYPE_PUBLIC);
+                ESP_LOGI(HID_DEMO_TAG, "Device added to whitelist.");
+            }
+            else
+            {
+                ESP_LOGW(HID_DEMO_TAG, "Whitelist is full, cannot add device.");
+            }
+        }
+
+        // 如果不在配对模式，设置广播参数为只允许白名单设备
+        if (!pairing_mode)
+        {
+            hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
+            esp_ble_gap_stop_advertising();
+            esp_ble_gap_start_advertising(&hidd_adv_params);
         }
         break;
 
