@@ -89,10 +89,6 @@ static uint8_t hidd_service_uuid128[] = {
     0x00,
 };
 
-#define BUTTON1_ID 0
-
-struct Button btn1;
-
 static esp_ble_adv_data_t hidd_adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
@@ -466,36 +462,6 @@ void app_main(void)
     esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
-
-    // 按键初始化
-    gpio_config_t input_io_conf = {
-        .pin_bit_mask = (1ULL << PAIRING_BUTTON_GPIO), // 配置 GPIO0 为输入
-        .mode = GPIO_MODE_INPUT,                       // 输入模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,             // 上拉
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,          // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE                 // 不需要中断
-    };
-    gpio_config(&input_io_conf);
-
-    // 当按下GPIO0时，使GPIO IO12 的 LED亮起
-    gpio_config_t output_io_conf = {
-        .pin_bit_mask = (1ULL << OUTPUT_LED_D4 | 1ULL << OUTPUT_LED_D5), // 配置 GPIO2 为输出
-        .mode = GPIO_MODE_OUTPUT,                                        // 输出模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,                               // 不需要上拉
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,                           // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE                                   // 不需要中断
-    };
-    gpio_config(&output_io_conf);
-
-    // 初始化按键对象
-    button_init(&btn1, read_button_GPIO, 1, 0); // 第三个参数为有效电平 0（低电平有效），第四个参数为按键 ID 艹，tmd debug半天结果是这里参考电平的问题，艹
-
-    button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
-    button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
-    button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_START_Handler);
-    button_start(&btn1);
-
-    xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);
 
     pairing_semaphore = xSemaphoreCreateBinary();
     xTaskCreate(&pairing_mode_task, "pairing_mode_task", 2048, NULL, 5, NULL);
