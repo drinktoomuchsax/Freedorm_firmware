@@ -173,11 +173,18 @@ void ws2812b_led_init(void)
     ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config, &led_chan));
 
     ESP_LOGI(TAG, "Install led strip encoder");
-    rmt_encoder_handle_t led_encoder = NULL;
+    led_encoder = NULL;
     led_strip_encoder_config_t encoder_config = {
         .resolution = RMT_LED_STRIP_RESOLUTION_HZ,
     };
-    ESP_ERROR_CHECK(rmt_new_led_strip_encoder(&encoder_config, &led_encoder));
+    // ESP_ERROR_CHECK(rmt_new_led_strip_encoder(&encoder_config, &led_encoder));
+
+    esp_err_t err = rmt_new_led_strip_encoder(&encoder_config, &led_encoder);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to install LED strip encoder: %s", esp_err_to_name(err));
+        return; // 提前返回，避免使用未初始化的 encoder
+    }
 
     ESP_LOGI(TAG, "Enable RMT TX channel");
     ESP_ERROR_CHECK(rmt_enable(led_chan));
@@ -317,7 +324,6 @@ static void ws2812b_led_rainbow_wave(void)
         led_strip_pixels[i * 3 + 2] = red;
     }
 
-    ESP_LOGI(TAG, "led_chan: %p, led_encoder: %p", led_chan, led_encoder);
     if (led_chan == NULL || led_encoder == NULL)
     {
         ESP_LOGE(TAG, "led_chan or led_encoder is not initialized properly!");
