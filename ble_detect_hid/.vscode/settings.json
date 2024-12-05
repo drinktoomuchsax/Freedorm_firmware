@@ -30,6 +30,13 @@
         "multi_button.h": "c",
         "ble_module.h": "c",
         "esp_bt_main.h": "c",
-        "esp_task_wdt.h": "c"
+        "esp_task_wdt.h": "c",
+        "esp_system.h": "c",
+        "esp_bt_defs.h": "c",
+        "esp_gap_ble_api.h": "c",
+        "esp_hidd_prf_api.h": "c",
+        "esp_bt.h": "c",
+        "esp_gatts_api.h": "c",
+        "esp_bt_device.h": "c"
     }
 }

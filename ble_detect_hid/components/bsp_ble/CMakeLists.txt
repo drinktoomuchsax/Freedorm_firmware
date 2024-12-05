@@ -4,6 +4,7 @@ idf_component_register(
                                 "hid_dev.c"
                                 "hid_device_le_prf.c"
                         INCLUDE_DIRS "."
+                        REQUIRES bt
                         PRIV_REQUIRES   bsp_button 
                                         driver
                                         freertos
@@ -12,7 +13,6 @@ idf_component_register(
                                         esp_event
                                         log
                                         nvs_flash
-                                        bt
                                         driver
                                         esp_common
 )

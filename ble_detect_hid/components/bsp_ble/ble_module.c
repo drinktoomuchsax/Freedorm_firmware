@@ -7,30 +7,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_bt.h"
 
-#include "esp_hidd_prf_api.h"
-#include "esp_bt_defs.h"
-#include "esp_mac.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gatts_api.h"
-#include "esp_gatt_defs.h"
-#include "esp_bt_main.h"
-#include "esp_bt_device.h"
+// #include "esp_bt_defs.h"
 #include "driver/gpio.h"
 #include "hid_dev.h"
 
 #include "esp_task_wdt.h"
 #include "multi_button.h"
 #include "button.h"
+
+#include "ble_module.h"
 
 /**
  * Brief:
@@ -64,6 +55,7 @@ static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
 static bool send_volum_up = false;
 static esp_bd_addr_t connected_bd_addr; // 用于存储连接设备的地址
+SemaphoreHandle_t pairing_semaphore = NULL;
 
 #define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
 
@@ -117,16 +109,10 @@ static esp_ble_adv_params_t hidd_adv_params = {
 };
 
 #define MAX_WHITELIST_SIZE 10
-typedef struct
-{
-    uint8_t num_devices;
-    esp_bd_addr_t devices[MAX_WHITELIST_SIZE];
-} whitelist_t;
 
 static whitelist_t whitelist;
 static bool pairing_mode = false;
 static esp_bd_addr_t connected_bd_addr;
-static SemaphoreHandle_t pairing_semaphore;
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
@@ -377,7 +363,7 @@ void hid_demo_task(void *pvParameters)
     }
 }
 
-void app_main(void)
+void ble_module_init(void)
 {
     esp_err_t ret;
 

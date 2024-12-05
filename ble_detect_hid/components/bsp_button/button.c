@@ -7,7 +7,11 @@
 #include "multi_button.h"
 #include "esp_mac.h"
 
-void flip_led(int gpio_num)
+#include "ble_module.h"
+
+static uint32_t led_state_mask = 0; // 位图，记录每个 GPIO 的当前状态
+
+void flip_gpio(int gpio_num)
 {
     if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
     {
@@ -45,8 +49,8 @@ void button_task(void *arg)
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(LED_TAG, "Single click detected");
-    flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
-    // 进入配对模式
+    flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
+    flip_gpio(CTL_LOCK);
 }
 
 void BTN1_DOUBLE_CLICK_Handler(void *btn)
@@ -54,18 +58,17 @@ void BTN1_DOUBLE_CLICK_Handler(void *btn)
     ESP_LOGI(LED_TAG, "Double click detected");
     for (int i = 0; i < 10; i++)
     {
-        flip_led(OUTPUT_LED_D4); // 翻转 LED 状态
+        flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
         vTaskDelay(100 / portTICK_PERIOD_MS);
-        flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
+        flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
+    xSemaphoreGive(pairing_semaphore);
 }
 
 void BTN1_LONG_PRESS_START_Handler(void *btn)
 {
-    ESP_LOGI(LED_TAG, "Long press hold detected");
-    flip_led(OUTPUT_LED_D5); // 翻转 LED 状态
-
-    ESP_LOGI(LED_TAG, "Long press detected, entering pairing mode.");
-    // xSemaphoreGive(pairing_semaphore);
+    ESP_LOGI(LED_TAG, "Long press start detected");
+    flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
+    flip_gpio(CTL_D0);
 }

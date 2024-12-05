@@ -20,6 +20,7 @@
 #include "esp_task_wdt.h"
 #include "multi_button.h"
 #include "button.h"
+#include "ble_module.h"
 
 /**
  * Brief:
@@ -59,22 +60,25 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
     // 按键初始化
+    uint64_t gpio_intput_sel = (1ULL << PAIRING_BUTTON_GPIO);
+    uint64_t gpio_output_sel = (1ULL << OUTPUT_LED_D4) | (1ULL << OUTPUT_LED_D5) | (1ULL << CTL_LOCK) | (1ULL << CTL_D0);
+
     gpio_config_t input_io_conf = {
-        .pin_bit_mask = (1ULL << PAIRING_BUTTON_GPIO), // 配置 GPIO0 为输入
-        .mode = GPIO_MODE_INPUT,                       // 输入模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,             // 上拉
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,          // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE                 // 不需要中断
+        .pin_bit_mask = gpio_intput_sel,      // 配置 GPIO0 为输入
+        .mode = GPIO_MODE_INPUT,              // 输入模式
+        .pull_up_en = GPIO_PULLUP_DISABLE,    // 上拉
+        .pull_down_en = GPIO_PULLDOWN_ENABLE, // 不需要下拉
+        .intr_type = GPIO_INTR_DISABLE        // 不需要中断
     };
     gpio_config(&input_io_conf);
 
     // 当按下GPIO0时，使GPIO IO12 的 LED亮起
     gpio_config_t output_io_conf = {
-        .pin_bit_mask = (1ULL << OUTPUT_LED_D4 | 1ULL << OUTPUT_LED_D5), // 配置 GPIO2 为输出
-        .mode = GPIO_MODE_OUTPUT,                                        // 输出模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,                               // 不需要上拉
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,                           // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE                                   // 不需要中断
+        .pin_bit_mask = gpio_output_sel,      // 配置 GPIO2 为输出
+        .mode = GPIO_MODE_OUTPUT,             // 输出模式
+        .pull_up_en = GPIO_PULLUP_DISABLE,    // 不需要上拉
+        .pull_down_en = GPIO_PULLDOWN_ENABLE, // 不需要下拉
+        .intr_type = GPIO_INTR_DISABLE        // 不需要中断
     };
     gpio_config(&output_io_conf);
 
@@ -87,4 +91,6 @@ void app_main(void)
     button_start(&btn1);
 
     xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);
+
+    ble_module_init();
 }
