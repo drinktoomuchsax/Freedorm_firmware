@@ -1,19 +1,19 @@
 #ifndef WS2812B_LED_H
 #define WS2812B_LED_H
 
-
 // 默认效果（可选）
-#define DEFAULT_EFFECT LED_EFFECT_RAINBOW
+#define DEFAULT_EFFECT LED_EFFECT_RAINBOW_ALL
 
 typedef enum
 {
-    LED_EFFECT_RAINBOW = 0, // 默认效果, 不亮灯
+    LED_EFFECT_RAINBOW_WAVE = 0, // 默认效果, 不亮灯
+    LED_EFFECT_RAINBOW_ALL,
     LED_EFFECT_BREATHING_WAVE,
     LED_EFFECT_BREATHING_ALL,
     LED_EFFECT_RAINBOW_BREATHING_ALL,
+    LED_EFFECT_RAINBOW_BREATHING_WAVE,
     LED_EFFECT_METEOR,
 } ws2812b_effect_t;
-
 typedef enum
 {
     LED_MODE_LOOP = 0,
@@ -59,7 +59,6 @@ typedef struct
 
 // 效果队列句柄
 extern QueueHandle_t effect_queue;
-
 // 用来传递参数的结构体
 typedef struct
 {

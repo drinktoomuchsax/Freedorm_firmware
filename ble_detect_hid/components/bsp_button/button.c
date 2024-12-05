@@ -47,27 +47,36 @@ void button_task(void *arg)
     }
 }
 
-static ws2812b_effect_t current_effect = DEFAULT_EFFECT;
+static ws2812b_effect_t current_effect_btn = DEFAULT_EFFECT;
+static ws2812b_queue_data_t effect_data = {
+    .effect_args = {
+        .color_rgb = {255, 0, 0}, // 红色
+        .direction = LED_DIRECTION_TOP_DOWN,
+        .loop_mode = LED_MODE_LOOP,
+    },
+    .current_effect = DEFAULT_EFFECT,
+};
 
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
-    ESP_LOGI(BUTTON_TAG, "Single click detected");
+    ESP_LOGI(BUTTON_TAG, "Single click detected\n");
     flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
     flip_gpio(CTL_LOCK);
 
     // 定义并初始化要发送的数据
 
     // 切换到下一个效果
-    current_effect = (current_effect + 1) % sizeof(ws2812b_effect_t); // 假设有5种效果，循环切换
-
-    ws2812b_queue_data_t effect_data = {
+    current_effect_btn = (current_effect_btn + 1) % 7; // 假设有5种效果，循环切换
+    ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
+    effect_data = (ws2812b_queue_data_t){
+        .current_effect = current_effect_btn,
         .effect_args = {
-            .color_rgb = {255, 0, 0}, // 红色
+            .color_rgb = WHITE_RGB, // 根据需要设置颜色
             .direction = LED_DIRECTION_TOP_DOWN,
             .loop_mode = LED_MODE_LOOP,
         },
-        .current_effect = LED_EFFECT_BREATHING_WAVE, // 呼吸波效果
     };
+    ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
 
     // 发送数据到队列
     if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
