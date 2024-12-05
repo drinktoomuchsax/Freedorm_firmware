@@ -10,7 +10,8 @@
 #define CTL_D0 GPIO_NUM_3
 #define LED_TAG "LED"
 
-void flip_gpio(int gpio_num);
+extern uint32_t led_state_mask; // 在这里初始化，位图，记录每个 GPIO 的当前状态
+
 uint8_t read_button_GPIO(uint8_t button_id);
 void button_task(void *arg);
 void BTN1_SINGLE_CLICK_Handler(void *btn);

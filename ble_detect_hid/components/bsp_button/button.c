@@ -9,8 +9,6 @@
 
 #include "ble_module.h"
 
-static uint32_t led_state_mask = 0; // 位图，记录每个 GPIO 的当前状态
-
 void flip_gpio(int gpio_num)
 {
     if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
@@ -31,6 +29,8 @@ void flip_gpio(int gpio_num)
         led_state_mask |= (1 << gpio_num); // 设置该位
     }
 }
+
+uint32_t led_state_mask = 0; // 在这里初始化，位图，记录每个 GPIO 的当前状态
 
 uint8_t read_button_GPIO(uint8_t button_id)
 {
@@ -70,5 +70,5 @@ void BTN1_LONG_PRESS_START_Handler(void *btn)
 {
     ESP_LOGI(LED_TAG, "Long press start detected");
     flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
-    flip_gpio(CTL_D0);
+    // flip_gpio(CTL_D0);
 }

@@ -13,8 +13,6 @@ idf_component_register(
                                         esp_event
                                         log
                                         nvs_flash
-                                        driver
-                                        esp_common
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-const-variable)
