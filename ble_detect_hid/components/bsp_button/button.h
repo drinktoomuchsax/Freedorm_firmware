@@ -8,7 +8,7 @@
 #define OUTPUT_LED_D5 GPIO_NUM_13
 #define CTL_LOCK GPIO_NUM_6
 #define CTL_D0 GPIO_NUM_3
-#define LED_TAG "LED"
+#define BUTTON_TAG "BUTTON"
 
 extern uint32_t led_state_mask; // 在这里初始化，位图，记录每个 GPIO 的当前状态
 
