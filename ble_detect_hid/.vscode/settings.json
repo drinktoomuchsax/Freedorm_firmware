@@ -19,6 +19,7 @@
         "key_switch",
         "led",
         "ble",
+        "lock_control"
     ],
     "files.associations": {
         "*.gcode": "gcode",
