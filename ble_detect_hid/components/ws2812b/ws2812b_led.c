@@ -3,6 +3,9 @@
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
+#include <stdlib.h>
+#include <stdint.h>
+#include <time.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,7 +20,7 @@
 #define RMT_LED_STRIP_RESOLUTION_HZ 10000000 // 10MHz resolution, 1 tick = 0.1us (led strip needs a high resolution)
 #define RMT_LED_STRIP_GPIO_NUM GPIO_NUM_1    // GPIO number for the LED strip
 
-#define EXAMPLE_LED_NUMBERS 6
+#define WS2812B_LED_NUMBERS 6
 #define EXAMPLE_CHASE_SPEED_MS 50
 
 // 配置 RMT 通道
@@ -26,7 +29,7 @@ static rmt_encoder_handle_t led_encoder;
 static rmt_transmit_config_t tx_config;
 
 // ws2812b LED 灯带的像素数据
-static uint8_t led_strip_pixels[EXAMPLE_LED_NUMBERS * 3];
+static uint8_t led_strip_pixels[WS2812B_LED_NUMBERS * 3];
 
 // 定义日志标签
 static const char *TAG = "WS2812B_LED";
@@ -52,12 +55,23 @@ static ws2812b_effect_t ws2812b_current_effect = DEFAULT_EFFECT;
  * @param arg
  */
 static void ws2812b_effect_task(void *arg);
+
+/**
+ * @brief 为指定索引的 LED 设置颜色
+ *
+ * @param index
+ * @param r
+ * @param g
+ * @param b
+ */
+void ws2812b_set_color(int index, uint8_t r, uint8_t g, uint8_t b);
+
 /**
  * @brief 选择一个颜色，设置所有 LED 为这个颜色
  *
  * @param rgb_color
  */
-static void ws2812b_led_set_color(ws2812b_color_rgb_t rgb_color);
+static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color);
 
 /**
  * @brief 所有 LED 同时显示相同颜色，并逐渐变换 HSV 色环的 Hue 值
@@ -105,6 +119,12 @@ static void ws2812b_led_rainbow_breathing_wave(void);
  *
  */
 static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_t direction);
+
+/**
+ * @brief 乱闪，最杀马特的一集，用来提示门锁上了
+ *
+ */
+static void ws2812b_led_random_color(void);
 
 /**
  * @brief Simple helper function, converting HSV color space to RGB color space
@@ -198,6 +218,9 @@ void ws2812b_led_init(void)
     // 初始化队列
     effect_queue = xQueueCreate(1, sizeof(ws2812b_queue_data_t));
 
+    // 初始化随机数生成器（如果在主任务中已初始化，可以移除）
+    srand(time(NULL));
+
     // 创建效果任务
     xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, NULL);
 }
@@ -226,32 +249,35 @@ static void ws2812b_effect_task(void *arg)
         switch (ws2812b_current_effect)
         {
         case LED_EFFECT_RAINBOW_ALL:
-            ws2812b_led_rainbow_all();
+            // ws2812b_led_rainbow_all();
             break;
 
         case LED_EFFECT_RAINBOW_WAVE:
-            ws2812b_led_rainbow_wave();
+            // ws2812b_led_rainbow_wave();
             break;
 
         case LED_EFFECT_BREATHING_WAVE:
-            ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,
-                                       received_effect_queue_data.effect_args.direction,
-                                       received_effect_queue_data.effect_args.loop_mode);
+            // ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,
+            //    received_effect_queue_data.effect_args.direction,
+            //    received_effect_queue_data.effect_args.loop_mode);
             break;
 
         case LED_EFFECT_BREATHING_ALL:
-            ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
+            // ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
             break;
 
         case LED_EFFECT_RAINBOW_BREATHING_ALL:
-            ws2812b_led_rainbow_breathing_all();
+            // ws2812b_led_rainbow_breathing_all();
             break;
 
         case LED_EFFECT_RAINBOW_BREATHING_WAVE:
-            ws2812b_led_rainbow_breathing_wave();
+            // ws2812b_led_rainbow_breathing_wave();
             break;
         case LED_EFFECT_METEOR:
-            ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
+            // ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
+            break;
+        case LED_EFFECT_RANDOM_COLOR:
+            // ws2812b_led_random_color();
             break;
 
         default:
@@ -265,13 +291,33 @@ static void ws2812b_effect_task(void *arg)
     }
 }
 
-static void ws2812b_led_set_color(ws2812b_color_rgb_t rgb_color)
+void ws2812b_set_color(int index, uint8_t r, uint8_t g, uint8_t b)
+{
+    // 确保索引在有效范围内
+    if (index < 0 || index >= WS2812B_LED_NUMBERS)
+    {
+        ESP_LOGE(TAG, "Index %d is out of range", index);
+        return;
+    }
+
+    // 设置指定索引的 LED 颜色 (RGB)
+    // LED 的 RGB 数据是按照 Green, Blue, Red 顺序存储的
+    led_strip_pixels[index * 3 + 0] = g; // Green
+    led_strip_pixels[index * 3 + 1] = b; // Blue
+    led_strip_pixels[index * 3 + 2] = r; // Red
+
+    // 刷新数据到 LED 灯带
+    ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
+    ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+}
+
+static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color)
 {
     uint32_t red = rgb_color.red;
     uint32_t green = rgb_color.green;
     uint32_t blue = rgb_color.blue;
 
-    for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+    for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
     {
         led_strip_pixels[i * 3 + 0] = green;
         led_strip_pixels[i * 3 + 1] = blue;
@@ -299,7 +345,7 @@ static void ws2812b_led_rainbow_all(void)
         led_strip_hsv2rgb(current_hue, saturation, value, &red, &green, &blue);
 
         // 设置所有 LED 的颜色为相同的 RGB
-        for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
         {
             led_strip_pixels[i * 3 + 0] = green;
             led_strip_pixels[i * 3 + 1] = blue;
@@ -319,11 +365,11 @@ static void ws2812b_led_rainbow_wave(void)
 {
     uint32_t hue_start = 0;                            // 起始 Hue 值
     uint32_t hue_end = 360;                            // 结束 Hue 值
-    uint32_t hue_step = hue_end / EXAMPLE_LED_NUMBERS; // 每个 LED 的 Hue 步长
+    uint32_t hue_step = hue_end / WS2812B_LED_NUMBERS; // 每个 LED 的 Hue 步长
     uint32_t saturation = 100;                         // 饱和度（固定为最大值）
     uint32_t value = 100;                              // 亮度（固定为最大值）
 
-    for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+    for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
     {
         // 计算当前 LED 的 Hue 值
         uint32_t current_hue = hue_start + i * hue_step;
@@ -363,18 +409,18 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
     int transition_delay_ms = 100; // 每一步的延迟时间 (ms)
 
     // 根据方向初始化 LED 索引范围
-    int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : EXAMPLE_LED_NUMBERS - 1;
-    int end = (direction == LED_DIRECTION_TOP_DOWN) ? EXAMPLE_LED_NUMBERS : -1;
+    int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
+    int end = (direction == LED_DIRECTION_TOP_DOWN) ? WS2812B_LED_NUMBERS : -1;
     int step = (direction == LED_DIRECTION_TOP_DOWN) ? 1 : -1;
 
     // 循环控制（一次完整的波动效果）
-    for (int t = 0; t < EXAMPLE_LED_NUMBERS; t++) // 每次波动从一个LED开始
+    for (int t = 0; t < WS2812B_LED_NUMBERS; t++) // 每次波动从一个LED开始
     {
         for (int i = start; i != end; i += step)
         {
             // 根据当前位置和时间t计算亮度
             int distance = abs(i - t);
-            int brightness = brightness_max - (brightness_max - brightness_min) * distance / EXAMPLE_LED_NUMBERS;
+            int brightness = brightness_max - (brightness_max - brightness_min) * distance / WS2812B_LED_NUMBERS;
 
             // 限制亮度范围
             if (brightness < brightness_min)
@@ -432,7 +478,7 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb)
         };
 
         // 设置整排灯带为调整后的颜色
-        for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
         {
             led_strip_pixels[i * 3 + 0] = adjusted_color.green;
             led_strip_pixels[i * 3 + 1] = adjusted_color.blue;
@@ -475,7 +521,7 @@ static void ws2812b_led_rainbow_breathing_all(void)
                           &rgb_color.red, &rgb_color.green, &rgb_color.blue);
 
         // 设置整排灯带为相同颜色
-        for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
         {
             led_strip_pixels[i * 3 + 0] = rgb_color.green;
             led_strip_pixels[i * 3 + 1] = rgb_color.blue;
@@ -507,15 +553,15 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
     memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
 
     // 计算方向
-    int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : EXAMPLE_LED_NUMBERS - 1;
-    int end = (direction == LED_DIRECTION_TOP_DOWN) ? EXAMPLE_LED_NUMBERS : -1;
+    int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
+    int end = (direction == LED_DIRECTION_TOP_DOWN) ? WS2812B_LED_NUMBERS : -1;
     int step = (direction == LED_DIRECTION_TOP_DOWN) ? 1 : -1;
 
     // 流星效果
     for (int pos = start; pos != end; pos += step)
     {
         // 每次更新 LED 带
-        for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++)
+        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
         {
             // 计算亮度衰减
             int distance = abs(pos - i);
@@ -542,7 +588,7 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
 
         // 添加衰减尾巴效果
-        for (int i = 0; i < EXAMPLE_LED_NUMBERS * 3; i++)
+        for (int i = 0; i < WS2812B_LED_NUMBERS * 3; i++)
         {
             if (led_strip_pixels[i] > fade_factor)
             {
@@ -555,3 +601,59 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
         }
     }
 }
+static void ws2812b_led_random_color(void)
+{
+    // 设置 LED 随机闪烁效果
+    for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
+    {
+        // 生成随机的 RGB 颜色
+        uint8_t r = rand() % 256; // 随机生成 0-255 的红色分量
+        uint8_t g = rand() % 256; // 随机生成 0-255 的绿色分量
+        uint8_t b = rand() % 256; // 随机生成 0-255 的蓝色分量
+
+        // 随机熄灭这次的LED
+        if (rand() % 4 == 0)
+        {
+            r = 0;
+            g = 0;
+            b = 0;
+        }
+
+        // 设置 LED 的颜色到 led_strip_pixels 数组
+        // WS2812B 的数据顺序是 G -> R -> B
+        led_strip_pixels[i * 3 + 0] = g; // Green
+        led_strip_pixels[i * 3 + 1] = r; // Red
+        led_strip_pixels[i * 3 + 2] = b; // Blue
+    }
+
+    // 刷新 LED 数据到灯带
+    ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
+    ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+}
+
+// static void ws2812b_led_random_color(void)
+// {
+//     // 初始化随机数生成器（仅需调用一次）
+//     srand(time(NULL));
+
+//     // 设置 LED 随机闪烁效果
+//     for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
+//     {
+//         // 生成随机的RGB颜色
+//         uint8_t r = rand() % 256; // 随机生成 0-255 的红色分量
+//         uint8_t g = rand() % 256; // 随机生成 0-255 的绿色分量
+//         uint8_t b = rand() % 256; // 随机生成 0-255 的蓝色分量
+
+//         // 设置 LED 的颜色
+//         ws2812b_set_color(i, r, g, b);
+//     }
+
+//     // 等待一段时间来创建闪烁效果
+//     // 这里假设有一个延时函数，比如 delay_ms(n)，根据实际情况调整
+//     vTaskDelay(pdMS_TO_TICKS(100)); // 延时 100ms (可以根据需要调整)
+
+//     // 重新调用函数产生新的乱闪效果
+//     // 你可以选择持续调用或者让外部循环控制
+//     // 在实际应用中，可以控制循环次数或者按某些条件停止
+//     ws2812b_led_random_color();
+// }

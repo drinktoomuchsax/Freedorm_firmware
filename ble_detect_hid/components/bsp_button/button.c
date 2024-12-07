@@ -10,6 +10,8 @@
 #include "ble_module.h"
 #include "ws2812b_led.h"
 
+uint32_t led_state_mask = 0; // 在这里初始化，位图，记录每个 GPIO 的当前状态
+
 void flip_gpio(int gpio_num)
 {
     if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
@@ -18,20 +20,35 @@ void flip_gpio(int gpio_num)
         return;
     }
 
+    esp_err_t res = ESP_OK;
     // 检查当前状态并翻转
     if (led_state_mask & (1 << gpio_num))
     {
-        gpio_set_level(gpio_num, 0);
+        res = gpio_set_level(gpio_num, 0);
         led_state_mask &= ~(1 << gpio_num); // 清除该位
+        if (res != ESP_OK)
+        {
+            ESP_LOGE("LED_FLIP", "Failed to set GPIO level");
+        }
+        else
+        {
+            ESP_LOGI("LED_FLIP", "GPIO %d set to 0", gpio_num);
+        }
     }
     else
     {
-        gpio_set_level(gpio_num, 1);
+        res = gpio_set_level(gpio_num, 1);
         led_state_mask |= (1 << gpio_num); // 设置该位
+        if (res != ESP_OK)
+        {
+            ESP_LOGE("LED_FLIP", "Failed to set GPIO level");
+        }
+        else
+        {
+            ESP_LOGI("LED_FLIP", "GPIO %d set to 1", gpio_num);
+        }
     }
 }
-
-uint32_t led_state_mask = 0; // 在这里初始化，位图，记录每个 GPIO 的当前状态
 
 uint8_t read_button_GPIO(uint8_t button_id)
 {
@@ -66,7 +83,8 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
     // 定义并初始化要发送的数据
 
     // 切换到下一个效果
-    current_effect_btn = (current_effect_btn + 1) % 7; // 假设有5种效果，循环切换
+    ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
+    current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS; // 假设有5种效果，循环切换
     ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
     effect_data = (ws2812b_queue_data_t){
         .current_effect = current_effect_btn,
