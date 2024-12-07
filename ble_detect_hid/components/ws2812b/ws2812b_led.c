@@ -249,35 +249,33 @@ static void ws2812b_effect_task(void *arg)
         switch (ws2812b_current_effect)
         {
         case LED_EFFECT_RAINBOW_ALL:
-            // ws2812b_led_rainbow_all();
+            ws2812b_led_rainbow_all();
             break;
 
         case LED_EFFECT_RAINBOW_WAVE:
-            // ws2812b_led_rainbow_wave();
+            ws2812b_led_rainbow_wave();
             break;
 
         case LED_EFFECT_BREATHING_WAVE:
-            // ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,
-            //    received_effect_queue_data.effect_args.direction,
-            //    received_effect_queue_data.effect_args.loop_mode);
+            ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,received_effect_queue_data.effect_args.direction,received_effect_queue_data.effect_args.loop_mode);
             break;
 
         case LED_EFFECT_BREATHING_ALL:
-            // ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
+            ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
             break;
 
         case LED_EFFECT_RAINBOW_BREATHING_ALL:
-            // ws2812b_led_rainbow_breathing_all();
+            ws2812b_led_rainbow_breathing_all();
             break;
 
         case LED_EFFECT_RAINBOW_BREATHING_WAVE:
-            // ws2812b_led_rainbow_breathing_wave();
+            ws2812b_led_rainbow_breathing_wave();
             break;
         case LED_EFFECT_METEOR:
-            // ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
+            ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
             break;
         case LED_EFFECT_RANDOM_COLOR:
-            // ws2812b_led_random_color();
+            ws2812b_led_random_color();
             break;
 
         default:
