@@ -89,9 +89,9 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
     }
     else if (current_effect_btn == LED_EFFECT_RAINBOW_BREATHING_ALL)
     {
-        current_effect_btn = LED_EFFECT_POWER_ON_ANIMATION;
+        current_effect_btn = LED_EFFECT_FIRST_POWER_ON_ACTIVATE;
     }
-    else if (current_effect_btn == LED_EFFECT_POWER_ON_ANIMATION)
+    else if (current_effect_btn == LED_EFFECT_FIRST_POWER_ON_ACTIVATE)
     {
         current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
     }

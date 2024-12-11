@@ -71,12 +71,14 @@ typedef struct
 
 #define FREEDORM_BLUE {0, 0, 255}
 #define WHITE_RGB {255, 255, 255}
-#define RED_RGB {255, 0, 0}
+#define RED_RGB {0, 0, 255}
 #define GREEN_RGB {0, 255, 0}
-#define BLUE_RGB {0, 0, 255}
-#define YELLOW_RGB {255, 255, 0}
-#define CYAN_RGB {0, 255, 255}
+#define BLUE_RGB {255, 0, 0}
+#define YELLOW_RGB {0, 255, 255}
+#define CYAN_RGB {255, 255, 0}
 #define PURPLE_RGB {255, 0, 255}
+
+#define INFINATE_MS 0
 
 // 效果队列句柄
 extern QueueHandle_t effect_queue;
