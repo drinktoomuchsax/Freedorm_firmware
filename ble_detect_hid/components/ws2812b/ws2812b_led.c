@@ -36,6 +36,7 @@ static const char *TAG = "WS2812B_LED";
 
 // 定义全局队列
 QueueHandle_t effect_queue = NULL;
+TaskHandle_t xLedTaskHandle = NULL; // 初始化为 NULL
 
 // 定义全局参数变量并初始化
 static ws2812b_queue_data_t received_effect_queue_data = {
@@ -45,7 +46,6 @@ static ws2812b_queue_data_t received_effect_queue_data = {
         .loop_mode = LED_MODE_LOOP,
     },
     .current_effect = DEFAULT_EFFECT,
-    .is_switch_effect = false,
 };
 
 static ws2812b_effect_t ws2812b_current_effect = DEFAULT_EFFECT;
@@ -267,22 +267,28 @@ void ws2812b_led_init(void)
     srand(time(NULL));
 
     // 创建效果任务
-    xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, NULL);
+    xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, &xLedTaskHandle);
 }
 
+static uint32_t notifyCount = 0;
 static void queue_receive_from_button(void)
 {
-    if (effect_queue == NULL)
+    if (xTaskNotifyWait(0, 0, &notifyCount, pdMS_TO_TICKS(50)) == pdPASS) // 说明需要转换效果了
     {
-        ESP_LOGE(TAG, "Effect queue not initialized!");
-    }
+        // 不要打印任何东西，需要低延时
+        // 用Notify做通知而不用queue是因为，通知时间开销更小，能够满足无极变色的需求
+        if (effect_queue == NULL)
+        {
+            ESP_LOGE(TAG, "Effect queue not initialized!");
+        }
 
-    if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
-    {
-        // 更新当前效果
-        is_switch_effect = true;
-        ws2812b_current_effect = received_effect_queue_data.current_effect;
-        ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
+        if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
+        {
+            // 更新当前效果
+            is_switch_effect = true;
+            ws2812b_current_effect = received_effect_queue_data.current_effect;
+            ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
+        }
     }
 }
 
@@ -328,7 +334,9 @@ static void ws2812b_effect_task(void *arg)
         case LED_EFFECT_RANDOM_COLOR:
             ws2812b_led_random_color();
             break;
-
+        case LED_EFFECT_POWER_ON_ANIMATION:
+            ws2812b_shutdown();
+            break;
         default:
             ESP_LOGW(TAG, "Unknown effect: %d", ws2812b_current_effect);
             ws2812b_current_effect = DEFAULT_EFFECT;
@@ -583,15 +591,14 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t br
 
 static void ws2812b_led_rainbow_breathing_all(void)
 {
-    queue_receive_from_button();
 
     // 可配置变量
-    int hue_start = 0;            // 起始颜色的 Hue 值
-    int hue_end = 360;            // 结束颜色的 Hue 值
-    int brightness_min = 10;      // 最低亮度
-    int brightness_max = 100;     // 最高亮度
-    int transition_steps = 500;   // 颜色和亮度变化的步数
-    int transition_delay_ms = 20; // 每一步的延迟时间 (ms)
+    int hue_start = 0;           // 起始颜色的 Hue 值
+    int hue_end = 360;           // 结束颜色的 Hue 值
+    int brightness_min = 10;     // 最低亮度
+    int brightness_max = 100;    // 最高亮度
+    int transition_steps = 1000; // 颜色和亮度变化的步数
+    int transition_delay_ms = 1; // 每一步的延迟时间 (ms)
 
     // HSV 和 RGB 颜色结构体
     ws2812b_color_hsv_t hsv_color = {0, 100, 0}; // 初始化 HSV 颜色
@@ -600,6 +607,8 @@ static void ws2812b_led_rainbow_breathing_all(void)
     // 同时改变颜色和亮度
     for (int step = 0; step <= transition_steps; step++) // 根据步数控制变化
     {
+        queue_receive_from_button();
+
         // 计算当前 Hue 和亮度值
         hsv_color.hue = hue_start + step * (hue_end - hue_start) / transition_steps;                                                              // 线性插值计算 Hue
         hsv_color.value = (step <= transition_steps / 2) ? (brightness_min + step * (brightness_max - brightness_min) / (transition_steps / 2)) : // 前半段亮度增加
@@ -756,29 +765,10 @@ static void ws2812b_led_random_color(void)
     }
 }
 
-// static void ws2812b_led_random_color(void)
-// {
-//     // 初始化随机数生成器（仅需调用一次）
-//     srand(time(NULL));
-
-//     // 设置 LED 随机闪烁效果
-//     for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
-//     {
-//         // 生成随机的RGB颜色
-//         uint8_t r = rand() % 256; // 随机生成 0-255 的红色分量
-//         uint8_t g = rand() % 256; // 随机生成 0-255 的绿色分量
-//         uint8_t b = rand() % 256; // 随机生成 0-255 的蓝色分量
-
-//         // 设置 LED 的颜色
-//         ws2812b_set_color(i, r, g, b);
-//     }
-
-//     // 等待一段时间来创建闪烁效果
-//     // 这里假设有一个延时函数，比如 delay_ms(n)，根据实际情况调整
-//     vTaskDelay(pdMS_TO_TICKS(100)); // 延时 100ms (可以根据需要调整)
-
-//     // 重新调用函数产生新的乱闪效果
-//     // 你可以选择持续调用或者让外部循环控制
-//     // 在实际应用中，可以控制循环次数或者按某些条件停止
-//     ws2812b_led_random_color();
-// }
+static void ws2812b_shutdown(void)
+{
+    // 关闭 LED 灯带，不发光
+    memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
+    ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
+    ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+}

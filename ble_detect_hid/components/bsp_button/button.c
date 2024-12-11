@@ -82,7 +82,24 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
 
     // 切换到下一个效果
     ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
-    current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS; // 假设有5种效果，循环切换
+    // current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS; // 假设有5种效果，循环切换
+    if (current_effect_btn == DEFAULT_EFFECT)
+    {
+        current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
+    }
+    else if (current_effect_btn == LED_EFFECT_RAINBOW_BREATHING_ALL)
+    {
+        current_effect_btn = LED_EFFECT_POWER_ON_ANIMATION;
+    }
+    else if (current_effect_btn == LED_EFFECT_POWER_ON_ANIMATION)
+    {
+        current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
+    }
+    else
+    {
+        current_effect_btn = DEFAULT_EFFECT;
+    }
+
     ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
     effect_data = (ws2812b_queue_data_t){
         .current_effect = current_effect_btn,
@@ -93,6 +110,10 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
         },
     };
     ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
+
+    // 通知LED线程切换效果
+
+    xTaskNotify(xLedTaskHandle, 0, eIncrement); // 通知 LED 任务
 
     // 发送数据到队列
     if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)

@@ -2,7 +2,7 @@
 #define WS2812B_LED_H
 
 // 默认效果（可选）
-#define DEFAULT_EFFECT LED_EFFECT_RAINBOW_BREATHING_ALL
+#define DEFAULT_EFFECT LED_EFFECT_RANDOM_COLOR
 #define WS2812B_NUMBER_OF_EFFECTS LED_EFFECT_COUNT + 1
 typedef enum
 {
@@ -80,12 +80,13 @@ typedef struct
 
 // 效果队列句柄
 extern QueueHandle_t effect_queue;
+extern TaskHandle_t xLedTaskHandle; // 声明任务句柄
+
 // 用来传递参数的结构体
 typedef struct
 {
     ws2812b_effect_args_t effect_args;
     ws2812b_effect_t current_effect;
-    bool is_switch_effect;
 } ws2812b_queue_data_t;
 
 void ws2812b_led_init(void);
