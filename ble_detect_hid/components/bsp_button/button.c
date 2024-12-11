@@ -80,31 +80,29 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
     flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
     flip_gpio(CTL_LOCK);
 
-    // 定义并初始化要发送的数据
-
     // 切换到下一个效果
-    // ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
-    // current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS; // 假设有5种效果，循环切换
-    // ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
-    // effect_data = (ws2812b_queue_data_t){
-    //     .current_effect = current_effect_btn,
-    //     .effect_args = {
-    //         .color_rgb = WHITE_RGB, // 根据需要设置颜色
-    //         .direction = LED_DIRECTION_TOP_DOWN,
-    //         .loop_mode = LED_MODE_LOOP,
-    //     },
-    // };
-    // ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
+    ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
+    current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS; // 假设有5种效果，循环切换
+    ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
+    effect_data = (ws2812b_queue_data_t){
+        .current_effect = current_effect_btn,
+        .effect_args = {
+            .color_rgb = WHITE_RGB, // 根据需要设置颜色
+            .direction = LED_DIRECTION_TOP_DOWN,
+            .loop_mode = LED_MODE_LOOP,
+        },
+    };
+    ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
 
-    // // 发送数据到队列
-    // if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
-    // {
-    //     ESP_LOGI(BUTTON_TAG, "Effect data sent to queue.");
-    // }
-    // else
-    // {
-    //     ESP_LOGI(BUTTON_TAG, "Failed to send effect data to queue.");
-    // }
+    // 发送数据到队列
+    if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
+    {
+        ESP_LOGI(BUTTON_TAG, "Effect data sent to queue.");
+    }
+    else
+    {
+        ESP_LOGI(BUTTON_TAG, "Failed to send effect data to queue.");
+    }
 }
 
 void BTN1_DOUBLE_CLICK_Handler(void *btn)

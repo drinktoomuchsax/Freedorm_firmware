@@ -93,5 +93,5 @@ void app_main(void)
 
     ble_module_init();
     ws2812b_led_init(); // 按键在之后初始化，因为按键依赖ws2812b的队列
-    xTaskCreate(&button_task, "button_task", 2048, NULL, 6, NULL);
+    xTaskCreate(&button_task, "button_task", 2048, NULL, 1, NULL);
 }

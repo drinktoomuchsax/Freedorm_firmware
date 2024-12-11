@@ -45,9 +45,14 @@ static ws2812b_queue_data_t received_effect_queue_data = {
         .loop_mode = LED_MODE_LOOP,
     },
     .current_effect = DEFAULT_EFFECT,
+    .is_switch_effect = false,
 };
 
 static ws2812b_effect_t ws2812b_current_effect = DEFAULT_EFFECT;
+
+static esp_err_t res;
+
+static volatile bool is_switch_effect = false; // 标志位，表示是否需要切换效果
 
 /**
  * @brief 在这个函数里切换效果，通过修改 current_effect 的值来切换效果
@@ -97,8 +102,11 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
 /**
  * @brief 所有led灯同时有呼吸灯效果，亮度颜色都统一，需要设置颜色
  *
+ * @param color_rgb 呼吸灯颜色
+ * @param breath_time_ms 呼吸灯周期时间，跑完一圈hsv色环需要的时间，单位 ms，
+ *
  */
-static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb);
+static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t breath_time_ms);
 
 /**
  * @brief 彩虹效果加呼吸灯效果，每个LED颜色亮度统一，不需要设置颜色
@@ -115,10 +123,13 @@ static void ws2812b_led_rainbow_breathing_wave(void);
 /**
  * @brief 像流星一样的效果，从一端到滑道另一端，亮度逐渐减小，非常快速，需要预先设置颜色
  *
- * @param direction 流星方向, 从上到下或者从下到上
+ * @param color_rgb 颜色
+ * @param metror_time_ms 流星效果持续时间，单位 ms
+ * @param direction 流星方向
+ * @param accumulate 是否累积效果，如果为 true，效果会叠加，否则会清除之前的效果
  *
  */
-static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_t direction);
+static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_time_ms, ws2812b_direction_t direction, bool accumulate);
 
 /**
  * @brief 乱闪，最杀马特的一集，用来提示门锁上了
@@ -127,12 +138,46 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
 static void ws2812b_led_random_color(void);
 
 /**
+ * @brief 闪烁效果
+ *
+ * @param color_rgb 颜色
+ * @param flash_hold_time 最小正周期持续时间, 单位 ms，不超过1分钟
+ * @param light_on_duty_cycle 亮灯时间占空比，0-100
+ * @param flash_count 闪烁次数
+ */
+static void ws2812b_led_flash(ws2812b_color_rgb_t color_rgb, uint16_t flash_hold_time_ms, uint8_t light_on_duty_cycle, uint8_t flash_count);
+
+/**
+ * @brief 像瀑布一样的效果，从顶端流向底端，亮起后的轨迹不会消失
+ *
+ * @param color_rgb 颜色
+ * @param waterfall_hold_time 效果时间，单位 ms
+ */
+
+static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterfall_hold_time_ms);
+
+/**
+ * @brief 日出效果，从顶端到底端，亮度逐渐增加，类似日出
+ *
+ * @param color_rgb 颜色
+ * @param sunrise_hold_time_ms 效果时间，单位 ms
+ */
+static void ws2812b_led_sunrise(ws2812b_color_rgb_t color_rgb, uint16_t sunrise_hold_time_ms);
+
+/**
+ * @brief 关闭 LED 灯带，不发光
+ *
+ */
+static void ws2812b_shutdown(void);
+
+/**
  * @brief Simple helper function, converting HSV color space to RGB color space
  *
  * Wiki: https://en.wikipedia.org/wiki/HSL_and_HSV
  *
  */
-static void led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b)
+static void
+led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b)
 {
     h %= 360; // h -> [0,360]
     uint32_t rgb_max = v * 2.55f;
@@ -225,25 +270,29 @@ void ws2812b_led_init(void)
     xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, NULL);
 }
 
+static void queue_receive_from_button(void)
+{
+    if (effect_queue == NULL)
+    {
+        ESP_LOGE(TAG, "Effect queue not initialized!");
+    }
+
+    if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
+    {
+        // 更新当前效果
+        is_switch_effect = true;
+        ws2812b_current_effect = received_effect_queue_data.current_effect;
+        ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
+    }
+}
+
 static void ws2812b_effect_task(void *arg)
 {
 
     while (1)
     {
         // 检查队列是否有新的效果命令
-
-        if (effect_queue == NULL)
-        {
-            ESP_LOGE(TAG, "Effect queue not initialized!");
-        }
-
-        if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
-        {
-            // 更新当前效果
-            ESP_LOGI(TAG, "Switch to effect: %d", received_effect_queue_data.current_effect);
-            ws2812b_current_effect = received_effect_queue_data.current_effect;
-            ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
-        }
+        queue_receive_from_button();
 
         // 执行当前效果
         switch (ws2812b_current_effect)
@@ -257,11 +306,13 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_BREATHING_WAVE:
-            ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,received_effect_queue_data.effect_args.direction,received_effect_queue_data.effect_args.loop_mode);
+            ws2812b_led_breathing_wave(received_effect_queue_data.effect_args.color_rgb,
+                                       received_effect_queue_data.effect_args.direction,
+                                       received_effect_queue_data.effect_args.loop_mode);
             break;
 
         case LED_EFFECT_BREATHING_ALL:
-            ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
+            // ws2812b_led_breathing_all(received_effect_queue_data.effect_args.color_rgb);
             break;
 
         case LED_EFFECT_RAINBOW_BREATHING_ALL:
@@ -272,7 +323,7 @@ static void ws2812b_effect_task(void *arg)
             ws2812b_led_rainbow_breathing_wave();
             break;
         case LED_EFFECT_METEOR:
-            ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
+            // ws2812b_led_meteor(received_effect_queue_data.effect_args.color_rgb, LED_DIRECTION_TOP_DOWN);
             break;
         case LED_EFFECT_RANDOM_COLOR:
             ws2812b_led_random_color();
@@ -283,7 +334,6 @@ static void ws2812b_effect_task(void *arg)
             ws2812b_current_effect = DEFAULT_EFFECT;
             break;
         }
-
         // 延迟一小段时间，避免任务占用过多 CPU
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -325,6 +375,8 @@ static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color)
 
 static void ws2812b_led_rainbow_all(void)
 {
+    queue_receive_from_button();
+
     // 可配置变量
     int hue_start = 0;            // 起始 Hue 值
     int hue_end = 360;            // 结束 Hue 值
@@ -354,6 +406,14 @@ static void ws2812b_led_rainbow_all(void)
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+        // 检查是否需要切换效果
+        if (is_switch_effect)
+        {
+            ESP_LOGI(TAG, "Effect switched during transition!");
+            is_switch_effect = false;
+            return;
+        }
+
         // 延迟控制彩虹变化速度
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
     }
@@ -361,6 +421,8 @@ static void ws2812b_led_rainbow_all(void)
 
 static void ws2812b_led_rainbow_wave(void)
 {
+    queue_receive_from_button();
+
     uint32_t hue_start = 0;                            // 起始 Hue 值
     uint32_t hue_end = 360;                            // 结束 Hue 值
     uint32_t hue_step = hue_end / WS2812B_LED_NUMBERS; // 每个 LED 的 Hue 步长
@@ -391,6 +453,14 @@ static void ws2812b_led_rainbow_wave(void)
     ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+    // 检查是否需要切换效果
+    if (is_switch_effect)
+    {
+        ESP_LOGI(TAG, "Effect switched during transition!");
+        is_switch_effect = false;
+        return;
+    }
+
     // 延迟控制彩虹的移动速度
     vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
 
@@ -400,6 +470,8 @@ static void ws2812b_led_rainbow_wave(void)
 
 static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_direction_t direction, ws2812b_loop_mode_t loop_mode)
 {
+    queue_receive_from_button();
+
     // 可配置变量
     int brightness_min = 10;       // 最低亮度
     int brightness_max = 100;      // 最高亮度
@@ -441,6 +513,13 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+        // 检查是否需要切换效果
+        if (is_switch_effect)
+        {
+            ESP_LOGI(TAG, "Effect switched during transition!");
+            is_switch_effect = false;
+            return;
+        }
         // 延迟控制
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
     }
@@ -454,8 +533,10 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
     }
 }
 
-static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb)
+static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t breath_time_ms)
 {
+    queue_receive_from_button();
+
     // 可配置变量
     int brightness_min = 10;      // 最低亮度
     int brightness_max = 100;     // 最高亮度
@@ -487,6 +568,14 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb)
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+        // 检查是否需要切换效果
+        if (is_switch_effect)
+        {
+            ESP_LOGI(TAG, "Effect switched during transition!");
+            is_switch_effect = false;
+            return;
+        }
+
         // 等待一段时间，展现动态效果
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms)); // 每次更新延时，调整变化速度
     }
@@ -494,6 +583,8 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb)
 
 static void ws2812b_led_rainbow_breathing_all(void)
 {
+    queue_receive_from_button();
+
     // 可配置变量
     int hue_start = 0;            // 起始颜色的 Hue 值
     int hue_end = 360;            // 结束颜色的 Hue 值
@@ -530,6 +621,14 @@ static void ws2812b_led_rainbow_breathing_all(void)
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+        // 检查是否需要切换效果
+        if (is_switch_effect)
+        {
+            ESP_LOGI(TAG, "Effect switched during transition!");
+            is_switch_effect = false;
+            return;
+        }
+
         // 等待一段时间，展现动态效果
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms)); // 每次更新延时，调整变化速度
     }
@@ -537,11 +636,21 @@ static void ws2812b_led_rainbow_breathing_all(void)
 
 static void ws2812b_led_rainbow_breathing_wave(void)
 {
-    ; // 未实现TODO
+    queue_receive_from_button();
+
+    // 检查是否需要切换效果
+    if (is_switch_effect)
+    {
+        ESP_LOGI(TAG, "Effect switched during transition!");
+        is_switch_effect = false;
+        return;
+    }
 }
 
-static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_t direction)
+static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_time_ms, ws2812b_direction_t direction, bool accumulate)
 {
+    queue_receive_from_button();
+
     // 配置参数
     int meteor_length = 3;        // 流星长度
     int fade_factor = 30;         // 衰减因子（控制亮度递减程度）
@@ -582,6 +691,14 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 
+        // 检查是否需要切换效果
+        if (is_switch_effect)
+        {
+            ESP_LOGI(TAG, "Effect switched during transition!");
+            is_switch_effect = false;
+            return;
+        }
+
         // 延迟控制速度
         vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
 
@@ -601,6 +718,8 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, ws2812b_direction_
 }
 static void ws2812b_led_random_color(void)
 {
+    queue_receive_from_button();
+
     // 设置 LED 随机闪烁效果
     for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
     {
@@ -627,6 +746,14 @@ static void ws2812b_led_random_color(void)
     // 刷新 LED 数据到灯带
     ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+
+    // 检查是否需要切换效果
+    if (is_switch_effect)
+    {
+        ESP_LOGI(TAG, "Effect switched during transition!");
+        is_switch_effect = false;
+        return;
+    }
 }
 
 // static void ws2812b_led_random_color(void)

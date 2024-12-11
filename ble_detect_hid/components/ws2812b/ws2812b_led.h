@@ -3,7 +3,7 @@
 
 // 默认效果（可选）
 #define DEFAULT_EFFECT LED_EFFECT_RAINBOW_BREATHING_ALL
-#define WS2812B_NUMBER_OF_EFFECTS LED_EFFECT_METEOR + 1
+#define WS2812B_NUMBER_OF_EFFECTS LED_EFFECT_COUNT + 1
 typedef enum
 {
     LED_EFFECT_RAINBOW_WAVE = 0, // 必须是0，不然不能知道EFFECT的数量
@@ -13,8 +13,27 @@ typedef enum
     LED_EFFECT_RAINBOW_BREATHING_ALL,
     LED_EFFECT_RAINBOW_BREATHING_WAVE,
     LED_EFFECT_RANDOM_COLOR,
-    /*!流星效果，一定要放在最后，用来判断效果数量!*/
     LED_EFFECT_METEOR,
+    // 以下为交互状态
+    LED_EFFECT_DEFAULT_STATE,             // 默认状态
+    LED_EFFECT_SINGLE_RECOVER,            // 单次恢复正常
+    LED_EFFECT_SINGLE_OPEN_DOOR,          // 单次开门
+    LED_EFFECT_ALWAYS_OPEN_MODE,          // 常开模式
+    LED_EFFECT_CONFIRM_FACTORY_RESET,     // 确定恢复出厂设置
+    LED_EFFECT_FACTORY_RESETTING,         // 恢复出厂设置中（发包给后端通知微信解绑，清蓝牙，清CAS
+    LED_EFFECT_DEVICE_INITIALIZED,        // 设备初始化完毕
+    LED_EFFECT_BLE_TRY_PAIRING,           // ble_尝试进入蓝牙配对
+    LED_EFFECT_BLE_PAIRING_MODE,          // ble_进入蓝牙配对状态
+    LED_EFFECT_BLE_CONNECTED_FIRST_TIME,  // ble_蓝牙连接（初次连接建立成功
+    LED_EFFECT_VISITOR_CODE_OPEN_DOOR,    // 访客码限时开门
+    LED_EFFECT_VISITOR_CODE_TIME_EXPIRED, // 访客码限时开门时间结束
+    LED_EFFECT_OPEN_BLUETOOTH_NEARBY,     // open_蓝牙靠近开门
+    LED_EFFECT_OPEN_BLUETOOTH_FINISHED,   // open_蓝牙靠近开门结束
+    LED_EFFECT_LOCK_DOOR,                 // open_锁门
+    LED_EFFECT_POWER_ON_ANIMATION,        // 默认上电动画
+    LED_EFFECT_FIRST_POWER_ON_ACTIVATE,   // 第一次上电激活
+    /*!没有效果，一定要放在最后，用来判断效果数量!*/
+    LED_EFFECT_COUNT,
 } ws2812b_effect_t;
 typedef enum
 {
@@ -66,6 +85,7 @@ typedef struct
 {
     ws2812b_effect_args_t effect_args;
     ws2812b_effect_t current_effect;
+    bool is_switch_effect;
 } ws2812b_queue_data_t;
 
 void ws2812b_led_init(void);
