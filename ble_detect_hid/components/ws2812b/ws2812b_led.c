@@ -417,7 +417,7 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_FIRST_POWER_ON_ACTIVATE:
-            ws2812b_led_sunrise((ws2812b_color_rgb_t)BLUE_RGB, 10 * 1000);
+            ws2812b_led_sunrise((ws2812b_color_rgb_t)BLUE_RGB, 2 * 1000);
             break;
 
         default:
@@ -916,10 +916,8 @@ static void ws2812b_led_sunrise(ws2812b_color_rgb_t color_rgb, uint16_t sunrise_
         return;
     }
 
-    queue_receive_from_button();
-
     // 配置参数
-    int total_steps = 20;                                   // 亮度渐变的总步数
+    int total_steps = 100;                                  // 亮度渐变的总步数
     int step_delay_ms = sunrise_hold_time_ms / total_steps; // 每步的延迟时间
     int led_count = WS2812B_LED_NUMBERS;                    // 总的 LED 数量
 
@@ -928,21 +926,25 @@ static void ws2812b_led_sunrise(ws2812b_color_rgb_t color_rgb, uint16_t sunrise_
 
     for (int step = 0; step < total_steps; step++)
     {
+        queue_receive_from_button();
         for (int i = 0; i < led_count; i++)
         {
-            // 计算非线性亮度，指数函数增强差异
-            float normalized_step = (float)step / total_steps;            // 当前进度的归一化
-            float position_factor = (float)i / (led_count - 1);           // LED 的位置归一化
-            brightness[i] = pow(normalized_step, 1.0f + position_factor); // 调整指数因子
+            // brightness[i] 增加逻辑
+            float progress = (float)(step - i * (total_steps / led_count)) / (total_steps / led_count);
+            if (progress < 0)
+                progress = 0; // 确保亮度不低于0
+            if (progress > 1.0f)
+                progress = 1.0f; // 确保亮度不高于1.0
+            brightness[i] = progress;
 
-            if (brightness[i] > 1.0f)
-                brightness[i] = 1.0f; // 限制最大亮度
+            if (brightness[i] > 1.0f) // 限制最大亮度
+                brightness[i] = 1.0f;
 
             // 根据亮度调整颜色
             ws2812b_color_rgb_t adjusted_color = {
-                .red = (uint8_t)(color_rgb.red * brightness[i]),
-                .green = (uint8_t)(color_rgb.green * brightness[i]),
-                .blue = (uint8_t)(color_rgb.blue * brightness[i]),
+                .red = (uint32_t)(color_rgb.red * brightness[i]),
+                .green = (uint32_t)(color_rgb.green * brightness[i]),
+                .blue = (uint32_t)(color_rgb.blue * brightness[i]),
             };
 
             // 设置 LED 的颜色
@@ -950,6 +952,9 @@ static void ws2812b_led_sunrise(ws2812b_color_rgb_t color_rgb, uint16_t sunrise_
             led_strip_pixels[i * 3 + 1] = adjusted_color.blue;
             led_strip_pixels[i * 3 + 2] = adjusted_color.red;
         }
+
+        // print brightness
+        // ESP_LOGI(TAG, "Brightness: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f", brightness[0], brightness[1], brightness[2], brightness[3], brightness[4], brightness[5], brightness[6], brightness[7], brightness[8], brightness[9]);
 
         // 刷新灯带
         refresh_led_strip();
