@@ -19,7 +19,8 @@
         "key_switch",
         "led",
         "ble",
-        "lock_control"
+        "lock_control",
+        "freedorm"
     ],
     "files.associations": {
         "*.gcode": "gcode",
