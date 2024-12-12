@@ -5,4 +5,5 @@ idf_component_register(
                 driver 
                 bsp_ble 
                 ws2812b
+                main
 )

@@ -86,9 +86,11 @@ void app_main(void)
     // 初始化按键对象
     button_init(&btn1, read_button_GPIO, 1, 0); // 第三个参数为有效电平 0（低电平有效），第四个参数为按键 ID 艹，tmd debug半天结果是这里参考电平的问题，艹
 
+    button_attach(&btn1, PRESS_REPEAT, BTN1_PRESS_REPEAT_Handler);
     button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
     button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
     button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_START_Handler);
+    button_attach(&btn1, LONG_PRESS_HOLD, BTN1_LONG_PRESS_HOLD_Handler);
     button_start(&btn1);
 
     ble_module_init();

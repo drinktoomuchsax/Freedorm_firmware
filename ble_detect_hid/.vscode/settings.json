@@ -46,6 +46,7 @@
         "esp_mac.h": "c",
         "led_strip_encoder.h": "c",
         "sdkconfig.h": "c",
-        "ws2812b_led.h": "c"
+        "ws2812b_led.h": "c",
+        "_freedorm_main.h": "c"
     }
 }
