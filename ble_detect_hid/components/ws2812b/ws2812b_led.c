@@ -242,6 +242,27 @@ static void refresh_led_strip()
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 }
 
+static void queue_receive_from_button(void)
+{
+    if (xTaskNotifyWait(0, 0, &notify_count, pdMS_TO_TICKS(50)) == pdPASS) // 说明需要转换效果了
+    {
+        // 不要打印任何东西，需要低延时
+        // 用Notify做通知而不用queue是因为，通知时间开销更小，能够满足无极变色的需求
+        if (effect_queue == NULL)
+        {
+            ESP_LOGE(TAG, "Effect queue not initialized!");
+        }
+
+        if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
+        {
+            // 更新当前效果
+            is_switch_effect = true;
+            ws2812b_current_effect = received_effect_queue_data.current_effect;
+            ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
+        }
+    }
+}
+
 void ws2812b_led_init(void)
 {
     ESP_LOGI(TAG, "Create RMT TX channel");
@@ -286,27 +307,6 @@ void ws2812b_led_init(void)
 
     // 创建效果任务
     xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, &xLedTaskHandle);
-}
-
-static void queue_receive_from_button(void)
-{
-    if (xTaskNotifyWait(0, 0, &notify_count, pdMS_TO_TICKS(50)) == pdPASS) // 说明需要转换效果了
-    {
-        // 不要打印任何东西，需要低延时
-        // 用Notify做通知而不用queue是因为，通知时间开销更小，能够满足无极变色的需求
-        if (effect_queue == NULL)
-        {
-            ESP_LOGE(TAG, "Effect queue not initialized!");
-        }
-
-        if (xQueueReceive(effect_queue, &received_effect_queue_data, 10) == pdPASS)
-        {
-            // 更新当前效果
-            is_switch_effect = true;
-            ws2812b_current_effect = received_effect_queue_data.current_effect;
-            ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
-        }
-    }
 }
 
 static void ws2812b_effect_task(void *arg)
@@ -471,7 +471,7 @@ static void ws2812b_led_rainbow_all(void)
     int hue_start = 0;            // 起始 Hue 值
     int hue_end = 360;            // 结束 Hue 值
     int transition_steps = 360;   // 颜色变化的步数（覆盖整个色环）
-    int transition_delay_ms = 20; // 每一步的延迟时间 (ms)
+    int TRANSITION_DELAY_MS = 20; // 每一步的延迟时间 (ms)
     int saturation = 100;         // 饱和度
     int value = 100;              // 亮度
 
@@ -504,7 +504,7 @@ static void ws2812b_led_rainbow_all(void)
         }
 
         // 延迟控制彩虹变化速度
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
+        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
     }
 }
 
@@ -559,7 +559,7 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
     int brightness_min = 10;       // 最低亮度
     int brightness_max = 100;      // 最高亮度
     int transition_steps = 100;    // 亮度变化的步数
-    int transition_delay_ms = 100; // 每一步的延迟时间 (ms)
+    int TRANSITION_DELAY_MS = 100; // 每一步的延迟时间 (ms)
 
     // 根据方向初始化 LED 索引范围
     int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
@@ -603,7 +603,7 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
             return;
         }
         // 延迟控制
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
+        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
     }
 
     // 如果是来回模式，反转方向
@@ -632,7 +632,7 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t br
     int brightness_min = 10;      // 最低亮度
     int brightness_max = 100;     // 最高亮度
     int transition_steps = 500;   // 亮度变化的步数
-    int transition_delay_ms = 20; // 每一步的延迟时间 (ms)
+    int TRANSITION_DELAY_MS = 20; // 每一步的延迟时间 (ms)
 
     // 调整亮度（呼吸效果）
     for (int step = 0; step <= transition_steps; step++) // 根据步数控制变化
@@ -667,7 +667,7 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t br
         }
 
         // 等待一段时间，展现动态效果
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms)); // 每次更新延时，调整变化速度
+        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS)); // 每次更新延时，调整变化速度
     }
 }
 
@@ -680,7 +680,7 @@ static void ws2812b_led_rainbow_breathing_all(uint16_t loop_time_ms)
     int brightness_min = 10;     // 最低亮度
     int brightness_max = 100;    // 最高亮度
     int transition_steps = 1000; // 颜色和亮度变化的步数
-    int transition_delay_ms = 1; // 每一步的延迟时间 (ms)
+    int TRANSITION_DELAY_MS = 1; // 每一步的延迟时间 (ms)
 
     // HSV 和 RGB 颜色结构体
     ws2812b_color_hsv_t hsv_color = {0, 100, 0}; // 初始化 HSV 颜色
@@ -720,7 +720,7 @@ static void ws2812b_led_rainbow_breathing_all(uint16_t loop_time_ms)
         }
 
         // 等待一段时间，展现动态效果
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms)); // 每次更新延时，调整变化速度
+        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS)); // 每次更新延时，调整变化速度
     }
 }
 
@@ -739,72 +739,114 @@ static void ws2812b_led_rainbow_breathing_wave(void)
 
 static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_time_ms, ws2812b_direction_t direction, bool accumulate)
 {
-    queue_receive_from_button();
-
     // 配置参数
-    int meteor_length = 3;        // 流星长度
-    int fade_factor = 30;         // 衰减因子（控制亮度递减程度）
-    int transition_delay_ms = 50; // 每帧的延迟时间 (ms)
+    const int TAIL_LENGTH = 2;                                                // 流星尾巴长度
+    const int TRANSITION_DELAY_MS = 50;                                       // 每帧的延迟时间 (ms)
+    const int METEOR_ACCUMULATE_TIME = metror_time_ms / WS2812B_LED_NUMBERS;  // 每课流星累积时间
+    const int METEOR_ACCUMULATE_COUNT = metror_time_ms / TRANSITION_DELAY_MS; // 流星效果循环次数
+
+    int accumulate_leds[WS2812B_LED_NUMBERS] = {0}; // 累积效果的 LED 数组
+    int accumulate_threshold = 3;                   // 累积效果的阈值，流星次数
 
     // 初始化 LED 数据
     memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
 
     // 计算方向
-    int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
-    int end = (direction == LED_DIRECTION_TOP_DOWN) ? WS2812B_LED_NUMBERS : -1;
-    int step = (direction == LED_DIRECTION_TOP_DOWN) ? 1 : -1;
+    const int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
+    const int end = (direction == LED_DIRECTION_TOP_DOWN) ? WS2812B_LED_NUMBERS : -1;
+    const int step = (direction == LED_DIRECTION_TOP_DOWN) ? 1 : -1;
 
-    // 流星效果
-    for (int pos = start; pos != end; pos += step)
+    for (int meteor_accumulate_count = WS2812B_LED_NUMBERS - 1; meteor_accumulate_count >= 0; meteor_accumulate_count--)
     {
-        // 每次更新 LED 带
-        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
+
+        for (int meteor_loop_count = 0; meteor_loop_count < accumulate_threshold; meteor_loop_count++)
         {
-            // 计算亮度衰减
-            int distance = abs(pos - i);
-            int brightness = (distance < meteor_length) ? (color_rgb.red * (meteor_length - distance) / meteor_length) : 0;
+            queue_receive_from_button();
 
-            // 调整颜色
-            ws2812b_color_rgb_t adjusted_color = {
-                .red = color_rgb.red * brightness / 255,
-                .green = color_rgb.green * brightness / 255,
-                .blue = color_rgb.blue * brightness / 255,
-            };
-
-            // 设置 LED 颜色
-            led_strip_pixels[i * 3 + 0] = adjusted_color.green;
-            led_strip_pixels[i * 3 + 1] = adjusted_color.blue;
-            led_strip_pixels[i * 3 + 2] = adjusted_color.red;
-        }
-
-        // 刷新颜色到灯带
-        refresh_led_strip();
-
-        // 检查是否需要切换效果
-        if (is_switch_effect)
-        {
-            ESP_LOGI(TAG, "Effect switched during transition!");
-            is_switch_effect = false;
-            return;
-        }
-
-        // 延迟控制速度
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
-
-        // 添加衰减尾巴效果
-        for (int i = 0; i < WS2812B_LED_NUMBERS * 3; i++)
-        {
-            if (led_strip_pixels[i] > fade_factor)
+            for (int meteor_head_pos = start; meteor_head_pos != end; meteor_head_pos += step)
             {
-                led_strip_pixels[i] -= fade_factor;
-            }
-            else
-            {
-                led_strip_pixels[i] = 0;
+                memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
+                // 每次更新 LED 带
+                for (int led_index = 0; led_index < WS2812B_LED_NUMBERS; led_index++)
+                {
+                    // 计算亮度衰减
+                    int distance_from_meteor = abs(meteor_head_pos - led_index);
+                    int brightness = 0;
+                    if (meteor_head_pos == led_index)
+                    {
+                        brightness = 255;
+                    }
+
+                    // 调整颜色
+                    ws2812b_color_rgb_t adjusted_color = {
+                        .red = (color_rgb.red * brightness) / 255,
+                        .green = (color_rgb.green * brightness) / 255,
+                        .blue = (color_rgb.blue * brightness) / 255,
+                    };
+
+                    led_strip_pixels[led_index * 3 + 0] = MIN(255, led_strip_pixels[led_index * 3 + 0] + adjusted_color.green);
+                    led_strip_pixels[led_index * 3 + 1] = MIN(255, led_strip_pixels[led_index * 3 + 1] + adjusted_color.blue);
+                    led_strip_pixels[led_index * 3 + 2] = MIN(255, led_strip_pixels[led_index * 3 + 2] + adjusted_color.red);
+
+                    // 为流星尾巴添加效果
+                    for (int tail_pos = 1; tail_pos <= TAIL_LENGTH; tail_pos++)
+                    {
+                        int tail_index = led_index - tail_pos * step;
+                        brightness = brightness / (tail_pos * 3);
+
+                        ws2812b_color_rgb_t tail_color = {
+                            .red = (color_rgb.red * brightness) / 255,
+                            .green = (color_rgb.green * brightness) / 255,
+                            .blue = (color_rgb.blue * brightness) / 255,
+                        };
+                        if (tail_index < 0)
+                        {
+                            break;
+                        }
+                        else
+                        {
+                            led_strip_pixels[tail_index * 3 + 0] = MIN(255, led_strip_pixels[tail_index * 3 + 0] + tail_color.green);
+                            led_strip_pixels[tail_index * 3 + 1] = MIN(255, led_strip_pixels[tail_index * 3 + 1] + tail_color.blue);
+                            led_strip_pixels[tail_index * 3 + 2] = MIN(255, led_strip_pixels[tail_index * 3 + 2] + tail_color.red);
+                        }
+                    }
+                }
+
+                ws2812b_color_rgb_t meteor_head_color = {
+                    .red = (color_rgb.red * 255) / 255,
+                    .green = (color_rgb.green * 255) / 255,
+                    .blue = (color_rgb.blue * 255) / 255,
+                };
+
+                for (int i = 0; i <= WS2812B_LED_NUMBERS; i++)
+                {
+                    if (accumulate_leds[i] == 1)
+                    {
+                        led_strip_pixels[i * 3 + 0] = meteor_head_color.green;
+                        led_strip_pixels[i * 3 + 1] = meteor_head_color.blue;
+                        led_strip_pixels[i * 3 + 2] = meteor_head_color.red;
+                    }
+                }
+
+                // 刷新颜色到灯带
+                refresh_led_strip();
+
+                // 检查是否需要切换效果
+                if (is_switch_effect)
+                {
+                    ESP_LOGI(TAG, "Effect switched during transition!");
+                    is_switch_effect = false;
+                    return;
+                }
+
+                // 延迟控制速度
+                vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
             }
         }
+        accumulate_leds[meteor_accumulate_count] = 1;
     }
 }
+
 static void ws2812b_led_random_color(void)
 {
     queue_receive_from_button();
@@ -825,8 +867,7 @@ static void ws2812b_led_random_color(void)
             b = 0;
         }
 
-        // 设置 LED 的颜色到 led_strip_pixels 数组
-        // WS2812B 的数据顺序是 G -> R -> B
+        // 设置 LED 的颜色到 led_strip_pixels 数组 WS2812B 的数据顺序是 G -> R -> B
         led_strip_pixels[i * 3 + 0] = g; // Green
         led_strip_pixels[i * 3 + 1] = r; // Red
         led_strip_pixels[i * 3 + 2] = b; // Blue
@@ -849,7 +890,7 @@ static void ws2812b_led_blink(ws2812b_color_rgb_t color_rgb, uint16_t flash_hold
     queue_receive_from_button();
 
     // 可配置变量
-    int transition_delay_ms = 1000 / 60;                                // 闪烁频率 (60Hz)
+    int TRANSITION_DELAY_MS = 1000 / 60;                                // 闪烁频率 (60Hz)
     int light_on_time = flash_hold_time_ms * light_on_duty_cycle / 100; // 亮灯时间
     int light_off_time = flash_hold_time_ms - light_on_time;            // 灭灯时间
 
@@ -879,7 +920,7 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
     queue_receive_from_button();
 
     // 可配置变量
-    int transition_delay_ms = waterfall_hold_time_ms / WS2812B_LED_NUMBERS;
+    int TRANSITION_DELAY_MS = waterfall_hold_time_ms / WS2812B_LED_NUMBERS;
 
     // 初始化 LED 数据
     memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
@@ -904,7 +945,7 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
         }
 
         // 延迟控制速度
-        vTaskDelay(pdMS_TO_TICKS(transition_delay_ms));
+        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
     }
 }
 

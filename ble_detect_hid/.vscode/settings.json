@@ -10,7 +10,7 @@
     "idf.openOcdConfigs": [
         "board/esp32c3-builtin.cfg"
     ],
-    "idf.port": "/dev/tty.wchusbserial56910190031",
+    "idf.port": "/dev/tty.wchusbserial59090640991",
     "idf.pythonBinPath": "/Users/sax/.espressif/python_env/idf5.3_py3.12_env/bin/python",
     "idf.toolsPath": "/Users/sax/.espressif",
     "idf.flashType": "UART",

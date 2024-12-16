@@ -95,16 +95,16 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
     // flip_gpio(CTL_LOCK);
 
     // 切换到下一个效果
-    // ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
+    ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
     if (current_effect_btn == DEFAULT_EFFECT)
     {
         current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
     }
     else if (current_effect_btn == LED_EFFECT_RAINBOW_BREATHING_ALL)
     {
-        current_effect_btn = LED_EFFECT_FIRST_POWER_ON_ACTIVATE;
+        current_effect_btn = LED_EFFECT_BLE_TRY_PAIRING;
     }
-    else if (current_effect_btn == LED_EFFECT_FIRST_POWER_ON_ACTIVATE)
+    else if (current_effect_btn == LED_EFFECT_BLE_TRY_PAIRING)
     {
         current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
     }
@@ -113,7 +113,9 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
         current_effect_btn = DEFAULT_EFFECT;
     }
 
-    // ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
+    // current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS;
+
+    ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
     effect_data = (ws2812b_queue_data_t){
         .current_effect = current_effect_btn,
         .effect_args = {
@@ -122,34 +124,34 @@ void BTN1_SINGLE_CLICK_Handler(void *btn)
             .loop_mode = LED_MODE_LOOP,
         },
     };
-    // ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
+    ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
 
     // 通知LED线程切换效果
 
-    // xTaskNotify(xLedTaskHandle, 0, eIncrement); // 通知 LED 任务
+    xTaskNotify(xLedTaskHandle, 0, eIncrement); // 通知 LED 任务
 
-    // // 发送数据到队列
-    // if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
-    // {
-    //     ESP_LOGI(BUTTON_TAG, "Effect data sent to queue.");
-    // }
-    // else
-    // {
-    //     ESP_LOGI(BUTTON_TAG, "Failed to send effect data to queue.");
-    // }
+    // 发送数据到队列
+    if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
+    {
+        ESP_LOGI(BUTTON_TAG, "Effect data sent to queue.");
+    }
+    else
+    {
+        ESP_LOGI(BUTTON_TAG, "Failed to send effect data to queue.");
+    }
 }
 
 void BTN1_DOUBLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Double click detected");
-    // for (int i = 0; i < 10; i++)
-    // {
-    //     flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
-    //     vTaskDelay(100 / portTICK_PERIOD_MS);
-    //     flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
-    //     vTaskDelay(100 / portTICK_PERIOD_MS);
-    // }
-    // xSemaphoreGive(pairing_semaphore);
+    for (int i = 0; i < 10; i++)
+    {
+        flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+    xSemaphoreGive(pairing_semaphore);
 }
 
 void BTN1_LONG_PRESS_START_Handler(void *btn)
