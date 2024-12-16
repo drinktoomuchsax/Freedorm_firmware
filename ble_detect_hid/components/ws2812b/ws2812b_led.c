@@ -236,12 +236,24 @@ led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, 
 }
 
 // 刷入数据到 LED 灯带
-static void refresh_led_strip()
+static void flash_led_strip()
 {
     ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
 }
 
+static ws2812b_color_rgb_t adjust_brightness(ws2812b_color_rgb_t *color_rgb, int brightness)
+{
+    ws2812b_color_rgb_t adjusted_color = {
+        .red = color_rgb->red * brightness / 100,
+        .green = color_rgb->green * brightness / 100,
+        .blue = color_rgb->blue * brightness / 100,
+    };
+
+    return adjusted_color;
+}
+
+// 从队列中接收转换效果命令
 static void queue_receive_from_button(void)
 {
     if (xTaskNotifyWait(0, 0, &notify_count, pdMS_TO_TICKS(50)) == pdPASS) // 说明需要转换效果了
@@ -260,6 +272,17 @@ static void queue_receive_from_button(void)
             ws2812b_current_effect = received_effect_queue_data.current_effect;
             ESP_LOGI(TAG, "Switch to effect: %d", ws2812b_current_effect);
         }
+    }
+}
+
+// 检查是否需要切换效果
+static void check_effect_switch(void)
+{
+    if (is_switch_effect)
+    {
+        ESP_LOGI(TAG, "Effect switched during transition!");
+        is_switch_effect = false;
+        return;
     }
 }
 
@@ -446,7 +469,7 @@ void ws2812b_set_color(int index, uint8_t r, uint8_t g, uint8_t b)
     led_strip_pixels[index * 3 + 2] = r; // Red
 
     // 刷新数据到 LED 灯带
-    refresh_led_strip();
+    flash_led_strip();
 }
 
 static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color)
@@ -460,7 +483,7 @@ static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color)
     }
 
     // 刷新颜色到灯带
-    refresh_led_strip();
+    flash_led_strip();
 }
 
 static void ws2812b_led_rainbow_all(void)
@@ -493,7 +516,7 @@ static void ws2812b_led_rainbow_all(void)
         }
 
         // 刷新颜色到灯带
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -534,15 +557,9 @@ static void ws2812b_led_rainbow_wave(void)
     }
 
     // 刷新颜色到灯带
-    refresh_led_strip();
+    flash_led_strip();
 
-    // 检查是否需要切换效果
-    if (is_switch_effect)
-    {
-        ESP_LOGI(TAG, "Effect switched during transition!");
-        is_switch_effect = false;
-        return;
-    }
+    check_effect_switch();
 
     // 延迟控制彩虹的移动速度
     vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
@@ -593,7 +610,7 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
         }
 
         // 刷新LED数据
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -656,7 +673,7 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t br
         }
 
         // 刷新颜色到灯带
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -709,7 +726,7 @@ static void ws2812b_led_rainbow_breathing_all(uint16_t loop_time_ms)
         }
 
         // 刷新颜色到灯带
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -728,35 +745,31 @@ static void ws2812b_led_rainbow_breathing_wave(void)
 {
     queue_receive_from_button();
 
-    // 检查是否需要切换效果
-    if (is_switch_effect)
-    {
-        ESP_LOGI(TAG, "Effect switched during transition!");
-        is_switch_effect = false;
-        return;
-    }
+    check_effect_switch();
 }
 
 static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_time_ms, ws2812b_direction_t direction, bool accumulate)
 {
+    // 初始化 LED 数据
+    memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
+
     // 配置参数
     const int TAIL_LENGTH = 2;                                                // 流星尾巴长度
     const int TRANSITION_DELAY_MS = 50;                                       // 每帧的延迟时间 (ms)
     const int METEOR_ACCUMULATE_TIME = metror_time_ms / WS2812B_LED_NUMBERS;  // 每课流星累积时间
     const int METEOR_ACCUMULATE_COUNT = metror_time_ms / TRANSITION_DELAY_MS; // 流星效果循环次数
 
-    int accumulate_leds[WS2812B_LED_NUMBERS] = {0}; // 累积效果的 LED 数组
-    int accumulate_threshold = 3;                   // 累积效果的阈值，流星次数
-
-    // 初始化 LED 数据
-    memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
-
     // 计算方向
     const int start = (direction == LED_DIRECTION_TOP_DOWN) ? 0 : WS2812B_LED_NUMBERS - 1;
     const int end = (direction == LED_DIRECTION_TOP_DOWN) ? WS2812B_LED_NUMBERS : -1;
     const int step = (direction == LED_DIRECTION_TOP_DOWN) ? 1 : -1;
 
-    for (int meteor_accumulate_count = WS2812B_LED_NUMBERS - 1; meteor_accumulate_count >= 0; meteor_accumulate_count--)
+    int accumulate_leds[WS2812B_LED_NUMBERS] = {0}; // 累积效果的 LED 数组
+    int accumulate_threshold = 3;                   // 累积效果的阈值，流星次数
+    ws2812b_color_rgb_t adjusted_color = {};
+    ws2812b_color_rgb_t tail_color = {};
+
+    for (int meteor_accumulate_count = WS2812B_LED_NUMBERS; meteor_accumulate_count >= 0; meteor_accumulate_count--)
     {
 
         for (int meteor_loop_count = 0; meteor_loop_count < accumulate_threshold; meteor_loop_count++)
@@ -774,15 +787,11 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_ti
                     int brightness = 0;
                     if (meteor_head_pos == led_index)
                     {
-                        brightness = 255;
+                        brightness = 100;
                     }
 
                     // 调整颜色
-                    ws2812b_color_rgb_t adjusted_color = {
-                        .red = (color_rgb.red * brightness) / 255,
-                        .green = (color_rgb.green * brightness) / 255,
-                        .blue = (color_rgb.blue * brightness) / 255,
-                    };
+                    adjusted_color = adjust_brightness(&color_rgb, brightness);
 
                     led_strip_pixels[led_index * 3 + 0] = MIN(255, led_strip_pixels[led_index * 3 + 0] + adjusted_color.green);
                     led_strip_pixels[led_index * 3 + 1] = MIN(255, led_strip_pixels[led_index * 3 + 1] + adjusted_color.blue);
@@ -794,11 +803,8 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_ti
                         int tail_index = led_index - tail_pos * step;
                         brightness = brightness / (tail_pos * 3);
 
-                        ws2812b_color_rgb_t tail_color = {
-                            .red = (color_rgb.red * brightness) / 255,
-                            .green = (color_rgb.green * brightness) / 255,
-                            .blue = (color_rgb.blue * brightness) / 255,
-                        };
+                        tail_color = adjust_brightness(&color_rgb, brightness);
+
                         if (tail_index < 0)
                         {
                             break;
@@ -812,39 +818,35 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_ti
                     }
                 }
 
-                ws2812b_color_rgb_t meteor_head_color = {
-                    .red = (color_rgb.red * 255) / 255,
-                    .green = (color_rgb.green * 255) / 255,
-                    .blue = (color_rgb.blue * 255) / 255,
-                };
-
                 for (int i = 0; i <= WS2812B_LED_NUMBERS; i++)
                 {
                     if (accumulate_leds[i] == 1)
                     {
-                        led_strip_pixels[i * 3 + 0] = meteor_head_color.green;
-                        led_strip_pixels[i * 3 + 1] = meteor_head_color.blue;
-                        led_strip_pixels[i * 3 + 2] = meteor_head_color.red;
+                        led_strip_pixels[i * 3 + 0] = color_rgb.green;
+                        led_strip_pixels[i * 3 + 1] = color_rgb.blue;
+                        led_strip_pixels[i * 3 + 2] = color_rgb.red;
                     }
                 }
 
                 // 刷新颜色到灯带
-                refresh_led_strip();
+                flash_led_strip();
 
-                // 检查是否需要切换效果
-                if (is_switch_effect)
-                {
-                    ESP_LOGI(TAG, "Effect switched during transition!");
-                    is_switch_effect = false;
-                    return;
-                }
+                check_effect_switch();
 
                 // 延迟控制速度
                 vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
             }
         }
+
         accumulate_leds[meteor_accumulate_count] = 1;
+
+        if (meteor_accumulate_count == 0)
+        {
+            ws2812b_led_set_color_all(color_rgb);
+        }
     }
+    // 最后再亮一会
+    vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
 static void ws2812b_led_random_color(void)
@@ -874,15 +876,9 @@ static void ws2812b_led_random_color(void)
     }
 
     // 刷新 LED 数据到灯带
-    refresh_led_strip();
+    flash_led_strip();
 
-    // 检查是否需要切换效果
-    if (is_switch_effect)
-    {
-        ESP_LOGI(TAG, "Effect switched during transition!");
-        is_switch_effect = false;
-        return;
-    }
+    check_effect_switch();
 }
 
 static void ws2812b_led_blink(ws2812b_color_rgb_t color_rgb, uint16_t flash_hold_time_ms, uint8_t light_on_duty_cycle, uint8_t flash_count)
@@ -934,7 +930,7 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
         led_strip_pixels[i * 3 + 2] = color_rgb.red;
 
         // 刷新颜色到灯带
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -998,7 +994,7 @@ static void ws2812b_led_sunrise(ws2812b_color_rgb_t color_rgb, uint16_t sunrise_
         // ESP_LOGI(TAG, "Brightness: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f", brightness[0], brightness[1], brightness[2], brightness[3], brightness[4], brightness[5], brightness[6], brightness[7], brightness[8], brightness[9]);
 
         // 刷新灯带
-        refresh_led_strip();
+        flash_led_strip();
 
         // 检查是否需要切换效果
         if (is_switch_effect)
@@ -1017,5 +1013,5 @@ static void ws2812b_shutdown(void)
 {
     // 关闭 LED 灯带，不发光
     memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
-    refresh_led_strip();
+    flash_led_strip();
 }
