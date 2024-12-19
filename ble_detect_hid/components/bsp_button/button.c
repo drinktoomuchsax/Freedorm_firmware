@@ -91,8 +91,8 @@ void BTN1_PRESS_REPEAT_Handler(void *btn)
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Single click detected\n");
-    // flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
-    // flip_gpio(CTL_LOCK);
+    flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
+    flip_gpio(CTL_LOCK);
 
     // 切换到下一个效果
     ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);

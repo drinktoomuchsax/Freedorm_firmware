@@ -73,7 +73,6 @@ void app_main(void)
     };
     gpio_config(&input_io_conf);
 
-    // 当按下GPIO0时，使GPIO IO12 的 LED亮起
     gpio_config_t output_io_conf = {
         .pin_bit_mask = gpio_output_sel,       // 配置 GPIO2 为输出
         .mode = GPIO_MODE_OUTPUT,              // 输出模式

@@ -256,7 +256,7 @@ static ws2812b_color_rgb_t adjust_brightness(ws2812b_color_rgb_t *color_rgb, int
 // 从队列中接收转换效果命令
 static void queue_receive_from_button(void)
 {
-    if (xTaskNotifyWait(0, 0, &notify_count, pdMS_TO_TICKS(50)) == pdPASS) // 说明需要转换效果了
+    if (xTaskNotifyWait(0, 0, &notify_count, pdMS_TO_TICKS(10)) == pdPASS) // 说明需要转换效果了
     {
         // 不要打印任何东西，需要低延时
         // 用Notify做通知而不用queue是因为，通知时间开销更小，能够满足无极变色的需求
@@ -404,7 +404,7 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_BLE_TRY_PAIRING:
-            ws2812b_led_meteor((ws2812b_color_rgb_t)BLUE_RGB, 500, LED_DIRECTION_TOP_DOWN, true);
+            ws2812b_led_meteor((ws2812b_color_rgb_t)BLUE_RGB, 500, LED_DIRECTION_TOP_DOWN, true); // 现在大概是7s多完成整个效果
             break;
 
         case LED_EFFECT_BLE_PAIRING_MODE:
@@ -631,7 +631,6 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
                                    LED_LOOP_MODE_SINGLE);
     }
 }
-
 static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t breath_time_ms)
 {
     if (breath_time_ms == 0)
@@ -639,52 +638,41 @@ static void ws2812b_led_breathing_all(ws2812b_color_rgb_t color_rgb, uint16_t br
         ESP_LOGE(TAG, "Breath time is 0, no effect will be shown!");
         return;
     }
-    {
-        /* code */
-    }
-
-    queue_receive_from_button();
 
     // 可配置变量
-    int brightness_min = 10;      // 最低亮度
-    int brightness_max = 100;     // 最高亮度
-    int transition_steps = 500;   // 亮度变化的步数
-    int TRANSITION_DELAY_MS = 20; // 每一步的延迟时间 (ms)
+    int brightness_min = 10;     // 最低亮度
+    int brightness_max = 100;    // 最高亮度
+    int transition_steps = 600;  // 亮度变化的步数
+    int TRANSITION_DELAY_MS = 1; // 每一步的延迟时间 (ms)
 
     // 调整亮度（呼吸效果）
     for (int step = 0; step <= transition_steps; step++) // 根据步数控制变化
     {
-        int brightness = (step <= transition_steps / 2) ? (brightness_min + step * (brightness_max - brightness_min) / (transition_steps / 2)) : // 前半段亮度增加
-                             (brightness_max - (step - transition_steps / 2) * (brightness_max - brightness_min) / (transition_steps / 2));      // 后半段亮度减少
+        queue_receive_from_button();
+        int brightness;
+        float progress = (float)step / transition_steps; // 当前进度
+
+        if (progress <= 0.5)
+        {
+            progress = pow(progress, 3);
+            // 前半段，亮度逐渐增加，低亮度时步长较小
+            brightness = brightness_min + (int)((brightness_max - brightness_min) * progress * 2); // 简单的线性增加
+        }
+        else
+        {
+            // 后半段，亮度逐渐减少，亮度高时步长较大
+            progress = (-progress + 1);
+            progress = pow(progress, 3);                                                           // 将后半段进度重新归一化为 [0, 1]
+            brightness = brightness_min + (int)((brightness_max - brightness_min) * progress * 2); // 简单的线性减少
+        }
 
         // 根据亮度调整颜色
-        ws2812b_color_rgb_t adjusted_color = {
-            .red = color_rgb.red * brightness / 100,
-            .green = color_rgb.green * brightness / 100,
-            .blue = color_rgb.blue * brightness / 100,
-        };
+        ws2812b_color_rgb_t adjusted_color = adjust_brightness(&color_rgb, brightness);
 
-        // 设置整排灯带为调整后的颜色
-        for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
-        {
-            led_strip_pixels[i * 3 + 0] = adjusted_color.green;
-            led_strip_pixels[i * 3 + 1] = adjusted_color.blue;
-            led_strip_pixels[i * 3 + 2] = adjusted_color.red;
-        }
+        // 更新 LED 显示
+        ws2812b_led_set_color_all(adjusted_color);
 
-        // 刷新颜色到灯带
-        flash_led_strip();
-
-        // 检查是否需要切换效果
-        if (is_switch_effect)
-        {
-            ESP_LOGI(TAG, "Effect switched during transition!");
-            is_switch_effect = false;
-            return;
-        }
-
-        // 等待一段时间，展现动态效果
-        vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS)); // 每次更新延时，调整变化速度
+        check_effect_switch();
     }
 }
 
