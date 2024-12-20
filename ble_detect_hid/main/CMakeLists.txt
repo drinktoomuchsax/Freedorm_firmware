@@ -1,6 +1,9 @@
 idf_component_register(SRCS     "_freedorm_main.c"
                     INCLUDE_DIRS "."
-                    REQUIRES bsp_button bsp_ble ws2812b
+                    REQUIRES    bsp_button 
+                                bsp_ble 
+                                ws2812b 
+                                lock_control
                     PRIV_REQUIRES   freertos
                                     esp_system
                                     esp_wifi
