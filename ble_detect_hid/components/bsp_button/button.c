@@ -1,77 +1,53 @@
 #include "button.h"
-#include "esp_log.h"
-#include "driver/gpio.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "multi_button.h"
-#include "esp_mac.h"
-
 #include "ble_module.h"
 #include "ws2812b_led.h"
 #include "_freedorm_main.h"
+#include "lock_control.h"
 
 // 宏定义
 #define BUTTON_TAG "BUTTON"
+#define LIGHT_EFFECT_DEMO 0
 
 // 定义全局变量
 uint32_t led_state_mask = 0; // 在这里初始化，位图，记录每个 GPIO 的当前状态
-
-// 定义局部变量
-
-static ws2812b_effect_t current_effect_btn = DEFAULT_EFFECT;
-static ws2812b_queue_data_t effect_data = {
-    .effect_args = {
-        .color_rgb = {255, 0, 0}, // 红色
-        .direction = LED_DIRECTION_TOP_DOWN,
-        .loop_mode = LED_MODE_LOOP,
-    },
-    .current_effect = DEFAULT_EFFECT,
-};
-
-// 定义函数
-
-void flip_gpio(int gpio_num)
-{
-    if (gpio_num < GPIO_NUM_0 || gpio_num >= GPIO_NUM_MAX)
-    {
-        ESP_LOGE(BUTTON_TAG, "Invalid GPIO number");
-        return;
-    }
-
-    esp_err_t res = ESP_OK;
-    // 检查当前状态并翻转
-    if (led_state_mask & (1 << gpio_num))
-    {
-        res = gpio_set_level(gpio_num, 0);
-        led_state_mask &= ~(1 << gpio_num); // 清除该位
-        if (res != ESP_OK)
-        {
-            ESP_LOGE(BUTTON_TAG, "Failed to set GPIO level");
-        }
-        else
-        {
-            ESP_LOGI(BUTTON_TAG, "GPIO %d set to 0", gpio_num);
-        }
-    }
-    else
-    {
-        res = gpio_set_level(gpio_num, 1);
-        led_state_mask |= (1 << gpio_num); // 设置该位
-        if (res != ESP_OK)
-        {
-            ESP_LOGE(BUTTON_TAG, "Failed to set GPIO level");
-        }
-        else
-        {
-            ESP_LOGI(BUTTON_TAG, "GPIO %d set to 1", gpio_num);
-        }
-    }
-}
+struct Button btn1;
 
 uint8_t read_button_GPIO(uint8_t button_id)
 {
     return gpio_get_level(PAIRING_BUTTON_GPIO);
+}
+
+void freedorm_button_init()
+{
+    uint64_t gpio_intput_sel = (1ULL << PAIRING_BUTTON_GPIO);
+
+    // 初始化按键
+    gpio_config_t io_conf;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = 1ULL << PAIRING_BUTTON_GPIO;
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+
+    gpio_config_t input_io_conf = {
+        .pin_bit_mask = gpio_intput_sel,      // 配置 GPIO0 为输入
+        .mode = GPIO_MODE_INPUT,              // 输入模式
+        .pull_up_en = GPIO_PULLUP_DISABLE,    // 上拉
+        .pull_down_en = GPIO_PULLDOWN_ENABLE, // 不需要下拉
+        .intr_type = GPIO_INTR_DISABLE        // 不需要中断
+    };
+    gpio_config(&input_io_conf);
+
+    // 初始化按键对象
+    button_init(&btn1, read_button_GPIO, 1, 0); // 第三个参数为有效电平 0（低电平有效），第四个参数为按键 ID 艹，tmd debug半天结果是这里参考电平的问题，艹
+
+    button_attach(&btn1, PRESS_REPEAT, BTN1_PRESS_REPEAT_Handler);
+    button_attach(&btn1, SINGLE_CLICK, BTN1_SINGLE_CLICK_Handler);
+    button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
+    button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_START_Handler);
+    button_attach(&btn1, LONG_PRESS_HOLD, BTN1_LONG_PRESS_HOLD_Handler);
+    button_start(&btn1);
 }
 
 void button_task(void *arg)
@@ -88,77 +64,25 @@ void BTN1_PRESS_REPEAT_Handler(void *btn)
     ESP_LOGI(BUTTON_TAG, "Press repeat detected\n");
 }
 
+// 单次开门
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
-    ESP_LOGI(BUTTON_TAG, "Single click detected\n");
-    flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
-    flip_gpio(CTL_LOCK);
-
-    // 切换到下一个效果
-    ESP_LOGI(BUTTON_TAG, "WS2812B_NUMBER_OF_EFFECTS: %d", WS2812B_NUMBER_OF_EFFECTS);
-    if (current_effect_btn == DEFAULT_EFFECT)
-    {
-        current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
-    }
-    else if (current_effect_btn == LED_EFFECT_RAINBOW_BREATHING_ALL)
-    {
-        current_effect_btn = LED_EFFECT_BLE_TRY_PAIRING;
-    }
-    else if (current_effect_btn == LED_EFFECT_BLE_TRY_PAIRING)
-    {
-        current_effect_btn = LED_EFFECT_RAINBOW_BREATHING_ALL;
-    }
-    else
-    {
-        current_effect_btn = DEFAULT_EFFECT;
-    }
-
-    // current_effect_btn = (current_effect_btn + 1) % WS2812B_NUMBER_OF_EFFECTS;
-
-    ESP_LOGI(BUTTON_TAG, "Switch to effect: %d", current_effect_btn);
-    effect_data = (ws2812b_queue_data_t){
-        .current_effect = current_effect_btn,
-        .effect_args = {
-            .color_rgb = WHITE_RGB, // 根据需要设置颜色
-            .direction = LED_DIRECTION_TOP_DOWN,
-            .loop_mode = LED_MODE_LOOP,
-        },
-    };
-    ESP_LOGI(BUTTON_TAG, "Sending effect data: current_effect=%d", effect_data.current_effect);
-
-    // 通知LED线程切换效果
-
-    xTaskNotify(xLedTaskHandle, 0, eIncrement); // 通知 LED 任务
-
-    // 发送数据到队列
-    if (xQueueSend(effect_queue, &effect_data, portMAX_DELAY) == pdPASS)
-    {
-        ESP_LOGI(BUTTON_TAG, "Effect data sent to queue.");
-    }
-    else
-    {
-        ESP_LOGI(BUTTON_TAG, "Failed to send effect data to queue.");
-    }
+    ESP_LOGI(BUTTON_TAG, "Single click detected");
+    single_click_toogle(); // 单击开门
 }
 
+// 双击进入常开模式
 void BTN1_DOUBLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Double click detected");
-    for (int i = 0; i < 10; i++)
-    {
-        flip_gpio(OUTPUT_LED_D4); // 翻转 LED 状态
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-        flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-    xSemaphoreGive(pairing_semaphore);
+    double_click_always_open(); // 双击进入常开模式
 }
 
 void BTN1_LONG_PRESS_START_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Long press start detected");
-    // flip_gpio(OUTPUT_LED_D5); // 翻转 LED 状态
-    // flip_gpio(CTL_D0);
+    xSemaphoreGive(pairing_semaphore);
+    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
 }
 
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
