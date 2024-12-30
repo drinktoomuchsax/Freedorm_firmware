@@ -8,4 +8,6 @@ idf_component_register(
                                         log
                                         nvs_flash
                                         main
+                                        bsp_button
+                                        ws2812b
 )
