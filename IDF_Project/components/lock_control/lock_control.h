@@ -17,9 +17,13 @@
 
 typedef enum
 {
-    LOCK_STATE_NORMAL = 0, // 门正常状态，未锁定，未打开，使用校园卡开门
-    LOCK_STATE_OPEN,       // 门打开状态，直接推开门
-    LOCK_STATE_LOCKED,     // 门锁定状态，任何卡都刷不开
+    STATE_POWER_ON_BLACK = 0,
+    STATE_NORAML_DEFAULT, // 门正常状态，未锁定，未打开，使用校园卡开门
+    STATE_TEMP_OPEN,      // 门打开状态，直接推开门
+    STATE_ALWAYS_OPEN,    // 门打开状态，直接推开门
+    STATE_LOCKED,         // 门锁定状态，任何卡都刷不开
+    STATE_TEMP_OPEN_END,
+    STATE_LOCK_END,
 } lock_status_t;
 
 // 定义门锁控制命令类型
@@ -31,17 +35,11 @@ typedef enum
     LOCK_CMD_ALWAYS_OPEN  // 常开模式
 } lock_command_t;
 
+extern QueueHandle_t button_event_queue;
+
 // 门锁模块相关函数
 void lock_control_init(void);
 void lock_control_task(void *pvParameters);
-void lock_send_command(lock_command_t cmd);
-lock_status_t lock_get_status(void);
-
-void lock_set_lock(void);
-void lock_set_open(void);
-void lock_set_normal(void);
-
-void single_click_toogle(void);
-void double_click_always_open(void);
+void transition_to_state(lock_status_t new_state);
 
 #endif // LOCK_CONTROL_H

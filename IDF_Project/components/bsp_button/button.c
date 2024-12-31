@@ -11,6 +11,18 @@
 // 定义全局变量
 uint32_t led_state_mask = 0; // 在这里初始化，位图，记录每个 GPIO 的当前状态
 struct Button btn1;
+QueueHandle_t button_event_queue = NULL;
+
+// 定义局部变量
+
+// 按键事件发送函数
+void send_button_event(button_event_t event)
+{
+    if (button_event_queue != NULL)
+    {
+        xQueueSend(button_event_queue, &event, 0);
+    }
+}
 
 uint8_t read_button_GPIO(uint8_t button_id)
 {
@@ -47,6 +59,10 @@ void freedorm_button_init()
     button_attach(&btn1, DOUBLE_CLICK, BTN1_DOUBLE_CLICK_Handler);
     button_attach(&btn1, LONG_PRESS_START, BTN1_LONG_PRESS_START_Handler);
     button_attach(&btn1, LONG_PRESS_HOLD, BTN1_LONG_PRESS_HOLD_Handler);
+    button_attach(&btn1, NONE_PRESS, BTN1_NONE_PRESS_HOLD_Handler);
+    button_attach(&btn1, PRESS_DOWN, BTN1_PRESS_DOWN_Handler);
+    button_attach(&btn1, PRESS_UP, BTN1_PRESS_UP_Handler);
+
     button_start(&btn1);
 }
 
@@ -59,23 +75,30 @@ void button_task(void *arg)
     }
 }
 
+// 返回多次点击的次数
+uint16_t button_get_multi_click_count()
+{
+    return btn1.repeat;
+}
+
 void BTN1_PRESS_REPEAT_Handler(void *btn)
 {
-    ESP_LOGI(BUTTON_TAG, "Press repeat detected\n");
+    ESP_LOGI(BUTTON_TAG, "Press repeat detected, repeat count: %d", btn1.repeat);
+    send_button_event(BUTTON_EVENT_MULTI_CLICK);
 }
 
 // 单次开门
 void BTN1_SINGLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Single click detected");
-    single_click_toogle(); // 单击开门
+    send_button_event(BUTTON_EVENT_SINGLE_CLICK);
 }
 
 // 双击进入常开模式
 void BTN1_DOUBLE_CLICK_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Double click detected");
-    double_click_always_open(); // 双击进入常开模式
+    send_button_event(BUTTON_EVENT_DOUBLE_CLICK);
 }
 
 void BTN1_LONG_PRESS_START_Handler(void *btn)
@@ -88,4 +111,19 @@ void BTN1_LONG_PRESS_START_Handler(void *btn)
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Long press hold detected");
+}
+
+void BTN1_NONE_PRESS_HOLD_Handler(void *btn)
+{
+    ESP_LOGI(BUTTON_TAG, "None press hold detected");
+}
+
+void BTN1_PRESS_DOWN_Handler(void *btn)
+{
+    ESP_LOGI(BUTTON_TAG, "Press down detected");
+}
+
+void BTN1_PRESS_UP_Handler(void *btn)
+{
+    ESP_LOGI(BUTTON_TAG, "Press up detected");
 }
