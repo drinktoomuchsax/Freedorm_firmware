@@ -51,6 +51,11 @@
         "_freedorm_main.h": "c",
         "button.h": "c",
         "math.h": "c",
-        "event_groups.h": "c"
+        "event_groups.h": "c",
+        "chrono": "c",
+        "typeinfo": "c",
+        "time.h": "c",
+        "stdint.h": "c",
+        "stdlib.h": "c"
     }
 }

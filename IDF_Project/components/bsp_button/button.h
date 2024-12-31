@@ -12,14 +12,13 @@
 
 #define PAIRING_BUTTON_GPIO GPIO_NUM_0 // 修改为您的按键GPIO编号
 
+// 定义按键事件枚举
 typedef enum
 {
-    BUTTON_SINGLE_CLICK = 0,
-    BUTTON_DOUBLE_CLICK,
-    BUTTON_LONG_PRESS,
-    BUTTON_SINGLE_CLICK_THEN_LONG_PRESS,
-
-} button_state_t;
+    BUTTON_EVENT_SINGLE_CLICK,
+    BUTTON_EVENT_DOUBLE_CLICK,
+    BUTTON_EVENT_MULTI_CLICK
+} button_event_t;
 
 extern uint32_t led_state_mask; // 在这里初始化，位图，记录每个 GPIO 的当前状态
 
@@ -28,11 +27,16 @@ extern uint32_t led_state_mask; // 在这里初始化，位图，记录每个 GP
 uint8_t read_button_GPIO(uint8_t button_id);
 void freedorm_button_init();
 void button_task(void *arg);
+uint16_t button_get_multi_click_count(void);
+void send_button_event(button_event_t event);
 
 void BTN1_PRESS_REPEAT_Handler(void *btn);
 void BTN1_SINGLE_CLICK_Handler(void *btn);
 void BTN1_DOUBLE_CLICK_Handler(void *btn);
 void BTN1_LONG_PRESS_START_Handler(void *btn);
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn);
+void BTN1_NONE_PRESS_HOLD_Handler(void *btn);
+void BTN1_PRESS_DOWN_Handler(void *btn);
+void BTN1_PRESS_UP_Handler(void *btn);
 
 #endif
