@@ -23,7 +23,6 @@
 
 #define WS2812B_LED_NUMBERS 6
 #define EXAMPLE_CHASE_SPEED_MS 50
-
 #define ENUM_TO_STRING(name) #name
 
 // 定义全局变量
@@ -503,13 +502,12 @@ static void ws2812b_effect_task(void *arg)
         case LED_EFFECT_LOCK_DOOR:
             ws2812b_led_random_color();
             break;
-
         case LED_EFFECT_POWER_ON_ANIMATION:
             ws2812b_shutdown();
             break;
 
         case LED_EFFECT_FIRST_POWER_ON_ACTIVATE:
-            ws2812b_led_sunrise((ws2812b_color_rgb_t)BLUE_RGB, 2 * 1000);
+            ws2812b_led_sunrise((ws2812b_color_rgb_t)BLUE_RGB, 6 * 1000);
             break;
 
         default:
