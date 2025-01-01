@@ -144,6 +144,7 @@ void transition_to_state(lock_status_t new_state)
 
 void handle_power_on_black()
 {
+    vTaskDelay(pdMS_TO_TICKS(666));
     ws2812b_switch_effect(LED_EFFECT_FIRST_POWER_ON_ACTIVATE);
     transition_to_state(STATE_NORAML_DEFAULT);
     vTaskDelay(pdMS_TO_TICKS(6000));
