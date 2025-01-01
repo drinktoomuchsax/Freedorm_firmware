@@ -447,7 +447,7 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_SINGLE_OPEN_DOOR:
-            ws2812b_led_waterfall((ws2812b_color_rgb_t)GREEN_RGB, 500);
+            ws2812b_led_waterfall((ws2812b_color_rgb_t)GREEN_RGB, 250);
             ws2812b_led_set_color_all((ws2812b_color_rgb_t)GREEN_RGB, TIME_RECOVER_TEMP_OPEN);
             break;
 
@@ -1010,9 +1010,7 @@ static void ws2812b_led_blink(ws2812b_color_rgb_t color_rgb, uint16_t flash_hold
 
 static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterfall_hold_time_ms)
 {
-    queue_receive_from_button();
 
-    // 可配置变量
     int TRANSITION_DELAY_MS = waterfall_hold_time_ms / WS2812B_LED_NUMBERS;
 
     // 初始化 LED 数据
@@ -1021,6 +1019,8 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
     // 从顶端到底端逐个点亮
     for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
     {
+        queue_receive_from_button();
+
         // 设置当前 LED 为指定颜色
         led_strip_pixels[i * 3 + 0] = color_rgb.green;
         led_strip_pixels[i * 3 + 1] = color_rgb.blue;
@@ -1037,10 +1037,10 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
         // 延迟控制速度
         vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
 
-        // if (check_effect_switch())
-        // {
-        //     return;
-        // }
+        if (check_effect_switch())
+        {
+            return;
+        }
     }
 }
 

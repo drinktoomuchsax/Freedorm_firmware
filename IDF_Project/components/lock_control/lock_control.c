@@ -77,12 +77,13 @@ void start_timer_temp_open()
     xTimerStart(temp_open_timer, 0);
 }
 
-void reset_timer(TimerHandle_t timer)
+void reset_timer(TimerHandle_t *timer)
 {
-    if (timer != NULL)
+    if (timer != NULL && *timer != NULL)
     {
-        xTimerStop(timer, 0);
-        xTimerDelete(timer, 0);
+        xTimerStop(*timer, 0);
+        xTimerDelete(*timer, 0);
+        *timer = NULL; // 防止二次释放
     }
 }
 
@@ -203,7 +204,7 @@ void transition_to_state(lock_status_t new_state)
 
 void transition_to_STATE_TEMP_OPEN_END()
 {
-    reset_timer(temp_open_timer); // 关闭单次开门设置的定时器
+    reset_timer(&temp_open_timer); // 关闭单次开门设置的定时器
     transition_to_state(STATE_TEMP_OPEN_END);
     send_button_event(BUTTON_EVENT_NONE_UPDATE_LOCK_CONTROL);
 }
