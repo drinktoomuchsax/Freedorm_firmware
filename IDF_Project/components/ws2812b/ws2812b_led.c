@@ -16,7 +16,8 @@
 #include "led_strip_encoder.h"
 
 #include "ws2812b_led.h"
-#include <math.h> // 用于指数计算
+#include "lock_control.h" //T IME_RECOVER_TEMP_OPEN
+#include <math.h>         // 用于指数计算
 
 #define RMT_LED_STRIP_RESOLUTION_HZ 10000000 // 10MHz resolution, 1 tick = 0.1us (led strip needs a high resolution)
 #define RMT_LED_STRIP_GPIO_NUM GPIO_NUM_1    // GPIO number for the LED strip
@@ -442,13 +443,12 @@ static void ws2812b_effect_task(void *arg)
 
             break;
         case LED_EFFECT_DEFAULT_STATE:
-            ws2812b_led_rainbow_breathing_all(15 * 1000);
+            ws2812b_led_rainbow_breathing_all(15 * 1000); // 15秒走完一圈色环
             break;
 
         case LED_EFFECT_SINGLE_OPEN_DOOR:
             ws2812b_led_waterfall((ws2812b_color_rgb_t)GREEN_RGB, 500);
-            ws2812b_led_set_color_all((ws2812b_color_rgb_t)GREEN_RGB, 5 * 60 * 1000);
-            ws2812b_led_blink((ws2812b_color_rgb_t)GREEN_RGB, 200, 50, 3);
+            ws2812b_led_set_color_all((ws2812b_color_rgb_t)GREEN_RGB, TIME_RECOVER_TEMP_OPEN);
             break;
 
         case LED_EFFECT_ALWAYS_OPEN_MODE:
@@ -973,6 +973,8 @@ static void ws2812b_led_random_color(void)
     // 刷新 LED 数据到灯带
     flash_led_strip();
 
+    vTaskDelay(pdMS_TO_TICKS(100)); // 延迟控制速度
+
     if (check_effect_switch())
     {
         return;
@@ -1034,6 +1036,11 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
 
         // 延迟控制速度
         vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
+
+        // if (check_effect_switch())
+        // {
+        //     return;
+        // }
     }
 }
 

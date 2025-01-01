@@ -59,20 +59,9 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    // 按键初始化
-    uint64_t gpio_output_sel = (1ULL << OUTPUT_LED_D4) | (1ULL << OUTPUT_LED_D5) | (1ULL << CTL_LOCK) | (1ULL << CTL_D0);
-
-    gpio_config_t output_io_conf = {
-        .pin_bit_mask = gpio_output_sel,
-        .mode = GPIO_MODE_OUTPUT,              // 输出模式
-        .pull_up_en = GPIO_PULLUP_DISABLE,     // 不需要上拉
-        .pull_down_en = GPIO_PULLDOWN_DISABLE, // 不需要下拉
-        .intr_type = GPIO_INTR_DISABLE         // 不需要中断
-    };
-    gpio_config(&output_io_conf);
 
     ble_module_init();
-    ws2812b_led_init(); // 按键在之后初始化，因为按键依赖ws2812b的队列
+    ws2812b_led_init(); // 按键在之后初始化，因为按键依赖ws2812b中的消息队列，TODO: 好像后面没用到消息队列来传递效果了，可以看看是否有这个顺序要求
     freedorm_button_init();
     lock_control_init();
     xTaskCreate(&button_task, "button_task", 2048, NULL, 1, NULL);
