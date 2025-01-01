@@ -77,6 +77,15 @@ void start_timer_temp_open()
     xTimerStart(temp_open_timer, 0);
 }
 
+void start_timer_lock()
+{
+    if (lock_timer == NULL)
+    {
+        lock_timer = xTimerCreate("LockTimer", pdMS_TO_TICKS(TIME_RECOVER_LOCK), pdFALSE, NULL, (TimerCallbackFunction_t)lock_set_normal);
+    }
+    xTimerStart(lock_timer, 0);
+}
+
 void reset_timer(TimerHandle_t *timer)
 {
     if (timer != NULL && *timer != NULL)
@@ -170,7 +179,7 @@ void lock_control_task(void *pvParameters)
                 break;
 
             case STATE_TEMP_OPEN_END:
-                ws2812b_switch_effect(LED_EFFECT_OPEN_MODE_END); // 开门结束闪烁
+                ws2812b_switch_effect(LED_EFFECT_OPEN_MODE_END); // 开门结束的闪烁
                 vTaskDelay(pdMS_TO_TICKS(600));
                 lock_set_normal();
                 break;
@@ -185,6 +194,7 @@ void lock_control_task(void *pvParameters)
             case STATE_LOCKED:
                 if (event == BUTTON_EVENT_SINGLE_CLICK || event == BUTTON_EVENT_DOUBLE_CLICK) // 单击或双击都可以关闭锁定模式🔒
                 {
+                    reset_timer(&lock_timer); // 关闭锁定设置的定时器
                     lock_set_normal();
                 }
                 break;
@@ -225,6 +235,8 @@ void lock_set_lock(void)
     // 打开两个板载LED
     gpio_set_level(OUTPUT_LED_D5, 1);
     gpio_set_level(OUTPUT_LED_D4, 1);
+
+    start_timer_lock(); // 开启定时器，TIME_RECOVER_LOCK秒后恢复到正常状态
 
     // 灯效和状态机切换到锁定状态
     ws2812b_switch_effect(LED_EFFECT_LOCK_DOOR);
