@@ -15,11 +15,13 @@
 #define OUTPUT_LED_D4 GPIO_NUM_12
 #define OUTPUT_LED_D5 GPIO_NUM_13
 
+#define TIME_RECOVER_TEMP_OPEN 5000 // 定义超时时间 (ms)
+
 typedef enum
 {
     STATE_POWER_ON_BLACK = 0,
     STATE_NORAML_DEFAULT, // 门正常状态，未锁定，未打开，使用校园卡开门
-    STATE_TEMP_OPEN,      // 门打开状态，直接推开门
+    STATE_TEMP_OPEN,      // 门展示打开状态，直接推开门，持续“TIME_RECOVER_TEMP_OPEN”秒
     STATE_ALWAYS_OPEN,    // 门打开状态，直接推开门
     STATE_LOCKED,         // 门锁定状态，任何卡都刷不开
     STATE_TEMP_OPEN_END,
