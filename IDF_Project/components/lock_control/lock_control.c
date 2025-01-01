@@ -176,14 +176,14 @@ void lock_control_task(void *pvParameters)
                 break;
 
             case STATE_ALWAYS_OPEN:
-                if (event == BUTTON_EVENT_SINGLE_CLICK || event == BUTTON_EVENT_DOUBLE_CLICK) // 单击或双击都可以关闭常开模式
+                if (event == BUTTON_EVENT_SINGLE_CLICK || event == BUTTON_EVENT_DOUBLE_CLICK) // 单击或双击都可以关闭常开模式🚪
                 {
                     transition_to_STATE_TEMP_OPEN_END();
                 }
                 break;
 
             case STATE_LOCKED:
-                if (event == BUTTON_EVENT_SINGLE_CLICK)
+                if (event == BUTTON_EVENT_SINGLE_CLICK || event == BUTTON_EVENT_DOUBLE_CLICK) // 单击或双击都可以关闭锁定模式🔒
                 {
                     lock_set_normal();
                 }
