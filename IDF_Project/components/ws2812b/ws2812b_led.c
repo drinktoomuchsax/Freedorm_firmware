@@ -426,6 +426,11 @@ void ws2812b_led_init(void)
     xTaskCreate(ws2812b_effect_task, "ws2812b_effect_task", 2048, NULL, 5, &xLedTaskHandle);
 }
 
+/**
+ * @brief 主状态机切换函数，根据当前状态切换到新的状态
+ *
+ * @param arg
+ */
 static void ws2812b_effect_task(void *arg)
 {
 
@@ -476,7 +481,7 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_BLE_PAIRING_MODE:
-            ws2812b_led_breathing_all((ws2812b_color_rgb_t)BLUE_RGB, 1000, false);
+            ws2812b_led_breathing_all((ws2812b_color_rgb_t)BLUE_RGB, 1000, true);
             break;
 
         case LED_EFFECT_BLE_CONNECTED_FIRST_TIME:
@@ -941,7 +946,7 @@ static void ws2812b_led_meteor(ws2812b_color_rgb_t color_rgb, uint16_t metror_ti
         }
     }
     // 最后再亮一会
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 static void ws2812b_led_random_color(void)

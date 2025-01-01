@@ -14,6 +14,12 @@ struct Button btn1;
 QueueHandle_t button_event_queue = NULL;
 
 // 定义局部变量
+static bool flag_long_press_start = false;
+// static bool flag_ble_start_pairing = false;
+static TimerHandle_t long_press_ble_timer = NULL;
+
+// 函数声明
+void ble_start_pairing(void);
 
 // 按键事件发送函数
 void send_button_event(button_event_t event)
@@ -107,8 +113,10 @@ void BTN1_DOUBLE_CLICK_Handler(void *btn)
 void BTN1_LONG_PRESS_START_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Long press start detected");
-    xSemaphoreGive(pairing_semaphore);
-    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
+    long_press_ble_timer = xTimerCreate("long_press_ble_timer", 6000 / portTICK_PERIOD_MS, pdFALSE, NULL, (TimerCallbackFunction_t)ble_start_pairing);
+    xTimerStart(long_press_ble_timer, 0);
+    ws2812b_switch_effect(LED_EFFECT_BLE_TRY_PAIRING);
+    flag_long_press_start = true;
 }
 
 void BTN1_LONG_PRESS_HOLD_Handler(void *btn)
@@ -129,4 +137,23 @@ void BTN1_PRESS_DOWN_Handler(void *btn)
 void BTN1_PRESS_UP_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Press up detected");
+
+    if (flag_long_press_start) // 长按之后的抬起就是长按结束
+    {
+        ESP_LOGI(BUTTON_TAG, "Long press end detected");
+        xTimerStop(long_press_ble_timer, 0);
+        xTimerDelete(long_press_ble_timer, 0);
+        ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+        flag_long_press_start = false;
+    }
+}
+
+void ble_start_pairing(void)
+{
+    xTimerStop(long_press_ble_timer, 0);
+    xTimerDelete(long_press_ble_timer, 0);
+
+    flag_long_press_start = false; // 清楚长按标志，防止放手之后去到默认灯效
+    xSemaphoreGive(pairing_semaphore);
+    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
 }
