@@ -1,7 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2021-2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
+ *这部分代码由ESP-IDF的BLE HID示例修改而来，github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/ble_hid_device_demo
  */
 
 #include <stdio.h>
@@ -24,33 +22,31 @@
 #include "ble_module.h"
 
 /**
- * Brief:
- * This example Implemented BLE HID device profile related functions, in which the HID device
- * has 4 Reports (1 is mouse, 2 is keyboard and LED, 3 is Consumer Devices, 4 is Vendor devices).
- * Users can choose different reports according to their own application scenarios.
- * BLE HID profile inheritance and USB HID class.
- */
-
-/**
- * Note:
- * 1. Win10 does not support vendor report , So SUPPORT_REPORT_VENDOR is always set to FALSE, it defines in hidd_le_prf_int.h
- * 2. Update connection parameters are not allowed during iPhone HID encryption, slave turns
- * off the ability to automatically update connection parameters during encryption.
- * 3. After our HID device is connected, the iPhones write 1 to the Report Characteristic Configuration Descriptor,
- * even if the HID encryption is not completed. This should actually be written 1 after the HID encryption is completed.
- * we modify the permissions of the Report Characteristic Configuration Descriptor to `ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE_ENCRYPTED`.
- * if you got `GATT_INSUF_ENCRYPTION` error, please ignore.
+ * brief: 蓝牙连接策略，维护两个白名单，一个是ble模块的白名单，一个是gap的广播白名单。ble模块白名单记录所有连接过的设备，gap广播白名单记录当前允许连接的设备。通过滚动更新gap广播白名单，实现多设备连接。
+ * 每次连接任务只有一个-获取RSSI值，RSSI超过门限值则开门。
+ *
+ *TODO: 1.能不能存下来白名单
+ *TODO: 2.能不能快速重连，不用每次都配对
+ *TODO: 3.白名单策略是否可以正常工作
+ *TODO: 4.能不能在连接时读取RSSI值，不用每次都读取
  */
 
 #define BLE_TAG "FREEDORM_BLE"
 #define GATT_TAG "BLE_GATT_SERVICE"
 
-#define GATTS_SERVICE_UUID 0x00FF
-#define GATTS_CHAR_UUID 0xFF01
-#define GATTS_NUM_HANDLE 4 // 服务句柄数量, 服务句柄、特征句柄、描述符句柄、描述符配置句柄, 4个句柄
+// UUID 定义
+#define SERVICE_UUID 0x00FF
+#define CHAR_UUID_WIFI_SSID 0xFF01 // Wi-Fi SSID 特性 UUID
+#define CHAR_UUID_WIFI_PASS 0xFF02 // Wi-Fi 密码特性 UUID
 
-static uint8_t gatt_char_value[64] = "Default_GATT_Value";
-static uint16_t gatt_handle_table[GATTS_NUM_HANDLE];
+#define GATTS_NUM_HANDLE 4
+#define DEVICE_NAME "Freedorm Pro (CC69)"
+#define CHARACTERISTIC_VAL_LEN 512
+
+static uint8_t adv_config_done = 0;
+static uint8_t wifi_ssid[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi SSID
+static uint8_t wifi_pass[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi 密码
+
 static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
 static bool send_volum_up = false;
@@ -59,7 +55,7 @@ SemaphoreHandle_t pairing_semaphore = NULL;
 
 #define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
 
-#define HIDD_DEVICE_NAME "Freedorm Lite"
+#define HIDD_DEVICE_NAME "Freedorm Lite (CC69)"
 static uint8_t hidd_service_uuid128[] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
     // first uuid, 16bit, [12],[13] is the value
@@ -81,7 +77,52 @@ static uint8_t hidd_service_uuid128[] = {
     0x00,
 };
 
-static esp_ble_adv_data_t hidd_adv_data = {
+// 广播数据配置
+static esp_ble_adv_data_t adv_data = {
+    .set_scan_rsp = false,
+    .include_name = true,
+    .include_txpower = false,
+    .min_interval = 0x20,
+    .max_interval = 0x40,
+    .appearance = 0x00,
+    .manufacturer_len = 0,
+    .p_manufacturer_data = NULL,
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = 16,
+    .p_service_uuid = NULL,
+    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
+};
+
+// 广播参数配置
+static esp_ble_adv_params_t adv_params = {
+    .adv_int_min = 0x20,
+    .adv_int_max = 0x40,
+    .adv_type = ADV_TYPE_IND,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
+
+// GATT 服务结构体
+static struct gatts_profile_inst
+{
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t conn_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    uint16_t char_handle_ssid;
+    uint16_t char_handle_pass;
+    esp_bt_uuid_t char_uuid_ssid;
+    esp_bt_uuid_t char_uuid_pass;
+} gl_profile = {
+    .gatts_cb = NULL,
+    .gatts_if = ESP_GATT_IF_NONE,
+};
+
+static esp_ble_adv_data_t freedorm_adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .include_txpower = true,
@@ -97,15 +138,30 @@ static esp_ble_adv_data_t hidd_adv_data = {
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT), // Always set the discoverable mode and BLE only
 };
 
-static esp_ble_adv_params_t hidd_adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x30,
-    .adv_type = ADV_TYPE_IND,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    //.peer_addr            =
-    //.peer_addr_type       =
-    .channel_map = ADV_CHNL_ALL,
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+// 配对模式广播参数
+static esp_ble_adv_params_t freedorm_pairing_adv_params = {
+    // 广播间隔小，方便设备快速发现
+    .adv_int_min = 0x20,                                     // 20*0.625ms
+    .adv_int_max = 0x30,                                     // 30*0.625ms
+    .adv_type = ADV_TYPE_IND,                                // Connectable and Scannable Undirected Advertising，一种可连接、可扫描的无方向广播，与任何主机建立连接的场景，比如配对
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,                   // 固化的公共地址，配对先暂时用这个
+    .channel_map = ADV_CHNL_ALL,                             // 所有通道都广播
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_ANY, // 允许任何设备扫描和连接
+    // .peer_addr =                                          //非定向广播，不需要对方地址
+    //.peer_addr_type       =                                //非定向广播，不需要对方地址
+};
+
+// 快速重连RSSI广播参数
+static esp_ble_adv_params_t freedorm_fast_recon_rssi_adv_params = {
+
+    .adv_int_min = 0x10,                                     // 广播间隔短，方便设备快速发现
+    .adv_int_max = 0x25,                                     // 广播间隔短，方便设备快速发现
+    .adv_type = ADV_TYPE_DIRECT_IND_HIGH,                    // 高速直接广播，快速重连
+    .own_addr_type = BLE_ADDR_TYPE_RPA_PUBLIC,               // 基于公有地址的可分辨私有地址，兼顾隐私和快速重连，配对后使用这个
+    .peer_addr = {0x20, 0x03, 0x06, 0x21, 0x69, 0x69},       // 定向广播时，需要对方地址，之后再根据白名单配置
+    .peer_addr_type = BLE_ADDR_TYPE_PUBLIC,                  // 定向广播时，需要对方地址，之后再根据白名单配置
+    .channel_map = ADV_CHNL_ALL,                             // 所有通道都广播
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_ANY, // 允许白名单设备扫描，允许任何设备连接
 };
 
 #define MAX_WHITELIST_SIZE 10
@@ -117,6 +173,9 @@ static esp_bd_addr_t connected_bd_addr;
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void pairing_mode_task(void *arg);
+// 蓝牙传WIFI回调函数
+static void dude_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
 /* 加载白名单 */
 esp_err_t load_whitelist_from_nvs(whitelist_t *list)
@@ -188,9 +247,9 @@ void pairing_mode_task(void *arg)
             ESP_LOGI(BLE_TAG, "Entering pairing mode.");
 
             // 设置广播参数允许所有设备连接
-            hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
+            freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
             esp_ble_gap_stop_advertising();
-            esp_ble_gap_start_advertising(&hidd_adv_params);
+            esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
 
             // 配对模式持续60秒
             vTaskDelay(60000 / portTICK_PERIOD_MS);
@@ -200,9 +259,9 @@ void pairing_mode_task(void *arg)
             ESP_LOGI(BLE_TAG, "Exiting pairing mode.");
 
             // 恢复广播参数为只允许白名单设备连接
-            hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
+            freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
             esp_ble_gap_stop_advertising();
-            esp_ble_gap_start_advertising(&hidd_adv_params);
+            esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
         }
     }
 }
@@ -216,7 +275,7 @@ static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *
         if (param->init_finish.state == ESP_HIDD_INIT_OK)
         {
             esp_ble_gap_set_device_name(HIDD_DEVICE_NAME);
-            esp_ble_gap_config_adv_data(&hidd_adv_data);
+            esp_ble_gap_config_adv_data(&freedorm_adv_data);
         }
         break;
     }
@@ -236,7 +295,7 @@ static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *
     {
         sec_conn = false;
         ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT");
-        esp_ble_gap_start_advertising(&hidd_adv_params);
+        esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
         break;
     }
     case ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT:
@@ -262,7 +321,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     switch (event)
     {
     case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
-        esp_ble_gap_start_advertising(&hidd_adv_params);
+        esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
         break;
     case ESP_GAP_BLE_SEC_REQ_EVT:
         for (int i = 0; i < ESP_BD_ADDR_LEN; i++)
@@ -309,9 +368,9 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         // 如果不在配对模式，设置广播参数为只允许白名单设备
         if (!pairing_mode)
         {
-            hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
+            freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
             esp_ble_gap_stop_advertising();
-            esp_ble_gap_start_advertising(&hidd_adv_params);
+            esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
         }
         break;
 
@@ -363,6 +422,104 @@ void hid_demo_task(void *pvParameters)
     }
 }
 
+static void dude_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    switch (event)
+    {
+    case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
+        ESP_LOGI(BLE_TAG, "Advertisement data set complete, start advertising.");
+        esp_ble_gap_start_advertising(&adv_params);
+        break;
+
+    case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+        if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS)
+        {
+            ESP_LOGI(BLE_TAG, "Advertising started successfully");
+        }
+        else
+        {
+            ESP_LOGE(BLE_TAG, "Failed to start advertising, error code: %d", param->adv_start_cmpl.status);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
+    switch (event)
+    {
+    case ESP_GATTS_REG_EVT:
+        ESP_LOGI(BLE_TAG, "ESP_GATTS_REG_EVT");
+        gl_profile.service_id.is_primary = true;
+        gl_profile.service_id.id.inst_id = 0x00;
+        gl_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
+        gl_profile.service_id.id.uuid.uuid.uuid16 = SERVICE_UUID;
+
+        esp_ble_gap_set_device_name(DEVICE_NAME);
+        esp_ble_gap_config_adv_data(&adv_data);
+
+        esp_ble_gatts_create_service(gatts_if, &gl_profile.service_id, GATTS_NUM_HANDLE);
+        break;
+
+    case ESP_GATTS_CREATE_EVT:
+        ESP_LOGI(BLE_TAG, "Service created, handle: %d", param->create.service_handle);
+        gl_profile.service_handle = param->create.service_handle;
+
+        esp_ble_gatts_start_service(gl_profile.service_handle);
+
+        // 添加 Wi-Fi SSID 特性
+        gl_profile.char_uuid_ssid.len = ESP_UUID_LEN_16;
+        gl_profile.char_uuid_ssid.uuid.uuid16 = CHAR_UUID_WIFI_SSID;
+        esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_ssid,
+                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                               ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
+                               NULL, NULL);
+
+        // 添加 Wi-Fi 密码特性
+        gl_profile.char_uuid_pass.len = ESP_UUID_LEN_16;
+        gl_profile.char_uuid_pass.uuid.uuid16 = CHAR_UUID_WIFI_PASS;
+        esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_pass,
+                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                               ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
+                               NULL, NULL);
+        break;
+
+    case ESP_GATTS_ADD_CHAR_EVT:
+        ESP_LOGI(BLE_TAG, "Characteristic added, attr_handle: %d", param->add_char.attr_handle);
+        if (param->add_char.char_uuid.uuid.uuid16 == CHAR_UUID_WIFI_SSID)
+        {
+            gl_profile.char_handle_ssid = param->add_char.attr_handle;
+        }
+        else if (param->add_char.char_uuid.uuid.uuid16 == CHAR_UUID_WIFI_PASS)
+        {
+            gl_profile.char_handle_pass = param->add_char.attr_handle;
+        }
+        break;
+
+    case ESP_GATTS_WRITE_EVT:
+        ESP_LOGI(BLE_TAG, "Write event received, handle: %d, value len: %d", param->write.handle, param->write.len);
+        if (param->write.handle == gl_profile.char_handle_ssid)
+        {
+            memcpy(wifi_ssid, param->write.value, param->write.len);
+            wifi_ssid[param->write.len] = '\0'; // 确保字符串以 '\0' 结尾
+            ESP_LOGI(BLE_TAG, "Received Wi-Fi SSID: %s", wifi_ssid);
+        }
+        else if (param->write.handle == gl_profile.char_handle_pass)
+        {
+            memcpy(wifi_pass, param->write.value, param->write.len);
+            wifi_pass[param->write.len] = '\0'; // 确保字符串以 '\0' 结尾
+            ESP_LOGI(BLE_TAG, "Received Wi-Fi Password: %s", wifi_pass);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
 void ble_module_init(void)
 {
     esp_err_t ret;
@@ -390,11 +547,11 @@ void ble_module_init(void)
     // 设置广播参数
     if (whitelist.num_devices == 0)
     {
-        hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
+        freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
     }
     else
     {
-        hidd_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
+        freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
     }
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
@@ -434,8 +591,12 @@ void ble_module_init(void)
     }
 
     // 注册回调函数
-    esp_ble_gap_register_callback(gap_event_handler);
-    esp_hidd_register_callbacks(hidd_event_callback);
+
+    esp_ble_gap_register_callback(dude_gap_event_handler);
+    esp_ble_gatts_register_callback(gatts_event_handler);
+    esp_ble_gatts_app_register(0);
+    // esp_ble_gap_register_callback(gap_event_handler);
+    // esp_hidd_register_callbacks(hidd_event_callback);
 
     /* 设置安全参数 */
     esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND; // bonding with peer device after authentication
