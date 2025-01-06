@@ -15,8 +15,8 @@
 #define OUTPUT_LED_D4 GPIO_NUM_12
 #define OUTPUT_LED_D5 GPIO_NUM_13
 
-#define TIME_RECOVER_TEMP_OPEN 5000      // 定义超时时间 (ms)
-#define TIME_RECOVER_LOCK 10 * 60 * 1000 // 定义超时时间 (ms)
+#define TIME_RECOVER_TEMP_OPEN 10 * 60 * 1000 // 定义超时时间 (ms)
+#define TIME_RECOVER_LOCK 10 * 60 * 1000      // 定义超时时间 (ms)
 
 typedef enum
 {
