@@ -25,25 +25,25 @@
  * brief: 蓝牙连接策略，维护两个白名单，一个是ble模块的白名单，一个是gap的广播白名单。ble模块白名单记录所有连接过的设备，gap广播白名单记录当前允许连接的设备。通过滚动更新gap广播白名单，实现多设备连接。
  * 每次连接任务只有一个-获取RSSI值，RSSI超过门限值则开门。
  *
- *TODO: 1.能不能存下来白名单
- *TODO: 2.能不能快速重连，不用每次都配对
- *TODO: 3.白名单策略是否可以正常工作
- *TODO: 4.能不能在连接时读取RSSI值，不用每次都读取
+ *  TODO: 1.能不能存下来白名单
+ *  TODO: 2.能不能快速重连，不用每次都配对
+ *  TODO: 3.白名单策略是否可以正常工作
+ *  TODO: 4.能不能在连接时读取RSSI值，不用每次都读取
+ *  DONE: 5.创建两个特性，一个是Wi-Fi SSID，一个是Wi-Fi 密码，用于传输Wi-Fi信息
  */
 
 #define BLE_TAG "FREEDORM_BLE"
 #define GATT_TAG "BLE_GATT_SERVICE"
 
 // UUID 定义
-#define SERVICE_UUID 0x00FF
-#define CHAR_UUID_WIFI_SSID 0xFF01 // Wi-Fi SSID 特性 UUID
-#define CHAR_UUID_WIFI_PASS 0xFF02 // Wi-Fi 密码特性 UUID
+#define SERVICE_UUID 0xFF69
+#define CHAR_UUID_WIFI_SSID 0xFF70 // Wi-Fi SSID 特性 UUID
+#define CHAR_UUID_WIFI_PASS 0xFF71 // Wi-Fi 密码特性 UUID
 
-#define GATTS_NUM_HANDLE 4
-#define DEVICE_NAME "Freedorm Pro (CC69)"
+#define GATTS_NUM_HANDLE 8
+#define DEVICE_NAME "Freedorm Pro (AE86)"
 #define CHARACTERISTIC_VAL_LEN 512
 
-static uint8_t adv_config_done = 0;
 static uint8_t wifi_ssid[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi SSID
 static uint8_t wifi_pass[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi 密码
 
@@ -473,21 +473,31 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         // 添加 Wi-Fi SSID 特性
         gl_profile.char_uuid_ssid.len = ESP_UUID_LEN_16;
         gl_profile.char_uuid_ssid.uuid.uuid16 = CHAR_UUID_WIFI_SSID;
-        esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_ssid,
-                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                               ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
-                               NULL, NULL);
+        if (esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_ssid,
+                                   ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                   ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
+                                   NULL, NULL))
+        {
+            ESP_LOGI(BLE_TAG, "Failed to add WIFI SSID characteristic");
+        }
 
         // 添加 Wi-Fi 密码特性
         gl_profile.char_uuid_pass.len = ESP_UUID_LEN_16;
         gl_profile.char_uuid_pass.uuid.uuid16 = CHAR_UUID_WIFI_PASS;
-        esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_pass,
-                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                               ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
-                               NULL, NULL);
+        if (esp_ble_gatts_add_char(gl_profile.service_handle, &gl_profile.char_uuid_pass,
+                                   ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                   ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
+                                   NULL, NULL))
+        {
+            ESP_LOGE(BLE_TAG, "Failed to add WIFI PASS characteristic");
+        }
         break;
 
     case ESP_GATTS_ADD_CHAR_EVT:
+        if (param->add_char.status != ESP_GATT_OK)
+        {
+            ESP_LOGE(BLE_TAG, "Failed to add characteristic, status: %d", param->add_char.status);
+        }
         ESP_LOGI(BLE_TAG, "Characteristic added, attr_handle: %d", param->add_char.attr_handle);
         if (param->add_char.char_uuid.uuid.uuid16 == CHAR_UUID_WIFI_SSID)
         {
