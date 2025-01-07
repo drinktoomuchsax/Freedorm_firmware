@@ -1,17 +1,29 @@
 /*
- *这部分代码由ESP-IDF的BLE HID示例修改而来，github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/ble_hid_device_demo
+ * SPDX-FileCopyrightText: 2021-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_bt.h"
 
-// #include "esp_bt_defs.h"
+#include "esp_hidd_prf_api.h"
+#include "esp_bt_defs.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+#include "esp_gatt_defs.h"
+#include "esp_bt_main.h"
+#include "esp_bt_device.h"
 #include "driver/gpio.h"
 #include "hid_dev.h"
 
@@ -22,18 +34,40 @@
 #include "ble_module.h"
 
 /**
- * brief: 蓝牙连接策略，维护两个白名单，一个是ble模块的白名单，一个是gap的广播白名单。ble模块白名单记录所有连接过的设备，gap广播白名单记录当前允许连接的设备。通过滚动更新gap广播白名单，实现多设备连接。
+ * BRIEF:
+ * This example Implemented BLE HID device profile related functions, in which the HID device
+ * has 4 Reports (1 is mouse, 2 is keyboard and LED, 3 is Consumer Devices, 4 is Vendor devices).
+ * Users can choose different reports according to their own application scenarios.
+ * BLE HID profile inheritance and USB HID class.
+ */
+
+/**
+ * Note:
+ * 1. Win10 does not support vendor report , So SUPPORT_REPORT_VENDOR is always set to FALSE, it defines in hidd_le_prf_int.h
+ * 2. Update connection parameters are not allowed during iPhone HID encryption, slave turns
+ * off the ability to automatically update connection parameters during encryption.
+ * 3. After our HID device is connected, the iPhones write 1 to the Report Characteristic Configuration Descriptor,
+ * even if the HID encryption is not completed. This should actually be written 1 after the HID encryption is completed.
+ * we modify the permissions of the Report Characteristic Configuration Descriptor to `ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE_ENCRYPTED`.
+ * if you got `GATT_INSUF_ENCRYPTION` error, please ignore.
+ */
+
+/**
+ * NOTE: 蓝牙连接策略，维护两个白名单，一个是ble模块的白名单，一个是gap的广播白名单。ble模块白名单记录所有连接过的设备，gap广播白名单记录当前允许连接的设备。通过滚动更新gap广播白名单，实现多设备连接。
  * 每次连接任务只有一个-获取RSSI值，RSSI超过门限值则开门。
  *
+ *  DONE: 0.能不能绑定成功 (2025-01-07)
  *  TODO: 1.能不能存下来白名单
  *  TODO: 2.能不能快速重连，不用每次都配对
  *  TODO: 3.白名单策略是否可以正常工作
- *  TODO: 4.能不能在连接时读取RSSI值，不用每次都读取
- *  DONE: 5.创建两个特性，一个是Wi-Fi SSID，一个是Wi-Fi 密码，用于传输Wi-Fi信息
+ *  DONE: 4.能不能在连接时读取RSSI值，不用每次都读取 (2025-01-06)
+ *  DONE: 5.创建两个特性，一个是Wi-Fi SSID，一个是Wi-Fi 密码，用于传输Wi-Fi信息 (2025-01-06)
  */
 
 #define BLE_TAG "FREEDORM_BLE"
-#define GATT_TAG "BLE_GATT_SERVICE"
+
+static uint16_t hid_conn_id = 0;
+#define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
 
 // UUID 定义
 #define SERVICE_UUID 0xFF69
@@ -41,21 +75,41 @@
 #define CHAR_UUID_WIFI_PASS 0xFF71 // Wi-Fi 密码特性 UUID
 
 #define GATTS_NUM_HANDLE 8
-#define DEVICE_NAME "Freedorm Pro (AE86)"
 #define CHARACTERISTIC_VAL_LEN 512
+#define MAX_WHITELIST_SIZE 10
+#define FREEDORM_DEVICE_NAME "Freedorm Pro (FM60)"
+
+static whitelist_t whitelist;
+static bool pairing_mode = false;
 
 static uint8_t wifi_ssid[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi SSID
 static uint8_t wifi_pass[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi 密码
 
-static uint16_t hid_conn_id = 0;
-static bool sec_conn = false;
-static bool send_volum_up = false;
-static esp_bd_addr_t connected_bd_addr; // 用于存储连接设备的地址
+static bool is_ble_sec_conn = false;
+static esp_bd_addr_t last_connected_bda; // 已连接蓝牙设备地址，用于存储连接设备的地址
+static int8_t rssi_threshold = -60;      // RSSI 阈值，超过这个值则开门
 SemaphoreHandle_t pairing_semaphore = NULL;
 
-#define CHAR_DECLARATION_SIZE (sizeof(uint8_t))
+static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 
-#define HIDD_DEVICE_NAME "Freedorm Lite (CC69)"
+// GATT 服务结构体
+static struct gatts_profile_inst
+{
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t conn_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    uint16_t char_handle_ssid;
+    uint16_t char_handle_pass;
+    esp_bt_uuid_t char_uuid_ssid;
+    esp_bt_uuid_t char_uuid_pass;
+} gl_profile = {
+    .gatts_cb = NULL,
+    .gatts_if = ESP_GATT_IF_NONE,
+};
+
 static uint8_t hidd_service_uuid128[] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
     // first uuid, 16bit, [12],[13] is the value
@@ -77,78 +131,31 @@ static uint8_t hidd_service_uuid128[] = {
     0x00,
 };
 
-// 广播数据配置
-static esp_ble_adv_data_t adv_data = {
-    .set_scan_rsp = false,
-    .include_name = true,
-    .include_txpower = false,
-    .min_interval = 0x20,
-    .max_interval = 0x40,
-    .appearance = 0x00,
-    .manufacturer_len = 0,
-    .p_manufacturer_data = NULL,
-    .service_data_len = 0,
-    .p_service_data = NULL,
-    .service_uuid_len = 16,
-    .p_service_uuid = NULL,
-    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
-};
-
-// 广播参数配置
-static esp_ble_adv_params_t adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x40,
-    .adv_type = ADV_TYPE_IND,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map = ADV_CHNL_ALL,
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-};
-
-// GATT 服务结构体
-static struct gatts_profile_inst
-{
-    esp_gatts_cb_t gatts_cb;
-    uint16_t gatts_if;
-    uint16_t app_id;
-    uint16_t conn_id;
-    uint16_t service_handle;
-    esp_gatt_srvc_id_t service_id;
-    uint16_t char_handle_ssid;
-    uint16_t char_handle_pass;
-    esp_bt_uuid_t char_uuid_ssid;
-    esp_bt_uuid_t char_uuid_pass;
-} gl_profile = {
-    .gatts_cb = NULL,
-    .gatts_if = ESP_GATT_IF_NONE,
-};
-
 static esp_ble_adv_data_t freedorm_adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .include_txpower = true,
     .min_interval = 0x0006, // slave connection min interval, Time = min_interval * 1.25 msec
     .max_interval = 0x0010, // slave connection max interval, Time = max_interval * 1.25 msec
-    .appearance = 0x0180,   // HID Generic,
+    .appearance = 0x03c0,   // HID Generic,
     .manufacturer_len = 0,
     .p_manufacturer_data = NULL,
     .service_data_len = 0,
     .p_service_data = NULL,
     .service_uuid_len = sizeof(hidd_service_uuid128),
     .p_service_uuid = hidd_service_uuid128,
-    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT), // Always set the discoverable mode and BLE only
+    .flag = 0x6,
 };
 
-// 配对模式广播参数
 static esp_ble_adv_params_t freedorm_pairing_adv_params = {
-    // 广播间隔小，方便设备快速发现
-    .adv_int_min = 0x20,                                     // 20*0.625ms
-    .adv_int_max = 0x30,                                     // 30*0.625ms
-    .adv_type = ADV_TYPE_IND,                                // Connectable and Scannable Undirected Advertising，一种可连接、可扫描的无方向广播，与任何主机建立连接的场景，比如配对
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,                   // 固化的公共地址，配对先暂时用这个
-    .channel_map = ADV_CHNL_ALL,                             // 所有通道都广播
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_ANY, // 允许任何设备扫描和连接
-    // .peer_addr =                                          //非定向广播，不需要对方地址
-    //.peer_addr_type       =                                //非定向广播，不需要对方地址
+    .adv_int_min = 0x20,
+    .adv_int_max = 0x30,
+    .adv_type = ADV_TYPE_IND,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    //.peer_addr            =
+    //.peer_addr_type       =
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
 // 快速重连RSSI广播参数
@@ -163,19 +170,6 @@ static esp_ble_adv_params_t freedorm_fast_recon_rssi_adv_params = {
     .channel_map = ADV_CHNL_ALL,                             // 所有通道都广播
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_ANY, // 允许白名单设备扫描，允许任何设备连接
 };
-
-#define MAX_WHITELIST_SIZE 10
-
-static whitelist_t whitelist;
-static bool pairing_mode = false;
-static esp_bd_addr_t connected_bd_addr;
-
-static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
-static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
-static void pairing_mode_task(void *arg);
-// 蓝牙传WIFI回调函数
-static void dude_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
-static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
 /* 加载白名单 */
 esp_err_t load_whitelist_from_nvs(whitelist_t *list)
@@ -235,6 +229,96 @@ esp_err_t delete_whitelist_from_nvs()
     return err;
 }
 
+void log_bonded_dev(void)
+{
+    int bond_dev_num = esp_ble_get_bond_device_num();
+    esp_ble_bond_dev_t bond_dev_list[bond_dev_num];
+    esp_ble_get_bond_device_list(&bond_dev_num, bond_dev_list);
+    ESP_LOGI(BLE_TAG, "Bonded devices: %d", bond_dev_num);
+    for (int i = 0; i < bond_dev_num; i++)
+    {
+        ESP_LOGI(BLE_TAG, "Bonded device %d: %02x:%02x:%02x:%02x:%02x:%02x",
+                 i,
+                 bond_dev_list[i].bd_addr[0], bond_dev_list[i].bd_addr[1], bond_dev_list[i].bd_addr[2],
+                 bond_dev_list[i].bd_addr[3], bond_dev_list[i].bd_addr[4], bond_dev_list[i].bd_addr[5]);
+    }
+
+    for (int i = 0; i < bond_dev_num; i++)
+    {
+        esp_ble_remove_bond_device(bond_dev_list[i].bd_addr);
+    }
+}
+
+static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
+{
+    switch (event)
+    {
+    case ESP_HIDD_EVENT_REG_FINISH:
+    {
+        if (param->init_finish.state == ESP_HIDD_INIT_OK)
+        {
+            // esp_bd_addr_t rand_addr = {0x04,0x11,0x11,0x11,0x11,0x05};
+            esp_ble_gap_set_device_name(FREEDORM_DEVICE_NAME);
+            esp_ble_gap_config_adv_data(&freedorm_adv_data);
+        }
+        break;
+    }
+    case ESP_BAT_EVENT_REG:
+    {
+        break;
+    }
+    case ESP_HIDD_EVENT_DEINIT_FINISH:
+        break;
+    case ESP_HIDD_EVENT_BLE_CONNECT:
+    {
+        ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_CONNECT");
+        hid_conn_id = param->connect.conn_id;
+        break;
+    }
+    case ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT:
+    {
+        ESP_LOGI(BLE_TAG, "%s, ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT", __func__);
+        ESP_LOG_BUFFER_HEX(BLE_TAG, param->vendor_write.data, param->vendor_write.length);
+        break;
+    }
+    case ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT:
+    {
+        ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT");
+        ESP_LOG_BUFFER_HEX(BLE_TAG, param->led_write.data, param->led_write.length);
+        break;
+    }
+    default:
+        break;
+    }
+    return;
+}
+
+void read_rssi_value(void *pvParameters)
+{
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    while (1)
+    {
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        if (is_ble_sec_conn)
+        {
+            esp_ble_gap_read_rssi(last_connected_bda);
+        }
+    }
+}
+
+void unlock_if_rssi_valid(int8_t rssi)
+{
+    if (rssi > rssi_threshold)
+    {
+        // ESP_LOGI(BLE_TAG, "RSSI value is valid, unlocking door.");
+        // 在此执行开门操作
+    }
+    else
+    {
+        // ESP_LOGI(BLE_TAG, "RSSI value is invalid, not unlocking door.");
+    }
+}
+
 /* 配对模式任务 */
 void pairing_mode_task(void *arg)
 {
@@ -266,56 +350,6 @@ void pairing_mode_task(void *arg)
     }
 }
 
-static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
-{
-    switch (event)
-    {
-    case ESP_HIDD_EVENT_REG_FINISH:
-    {
-        if (param->init_finish.state == ESP_HIDD_INIT_OK)
-        {
-            esp_ble_gap_set_device_name(HIDD_DEVICE_NAME);
-            esp_ble_gap_config_adv_data(&freedorm_adv_data);
-        }
-        break;
-    }
-    case ESP_BAT_EVENT_REG:
-    {
-        break;
-    }
-    case ESP_HIDD_EVENT_DEINIT_FINISH:
-        break;
-    case ESP_HIDD_EVENT_BLE_CONNECT:
-    {
-        ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_CONNECT");
-        hid_conn_id = param->connect.conn_id;
-        break;
-    }
-    case ESP_HIDD_EVENT_BLE_DISCONNECT:
-    {
-        sec_conn = false;
-        ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT");
-        esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
-        break;
-    }
-    case ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT:
-    {
-        ESP_LOGI(BLE_TAG, "%s, ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT", __func__);
-        ESP_LOG_BUFFER_HEX(BLE_TAG, param->vendor_write.data, param->vendor_write.length);
-        break;
-    }
-    case ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT:
-    {
-        ESP_LOGI(BLE_TAG, "ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT");
-        ESP_LOG_BUFFER_HEX(BLE_TAG, param->led_write.data, param->led_write.length);
-        break;
-    }
-    default:
-        break;
-    }
-    return;
-}
-
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event)
@@ -331,117 +365,22 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
         break;
     case ESP_GAP_BLE_AUTH_CMPL_EVT:
-        sec_conn = true;
-        memcpy(connected_bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
-        ESP_LOGI(BLE_TAG, "Device authenticated: %08x%04x",
-                 (connected_bd_addr[0] << 24) + (connected_bd_addr[1] << 16) + (connected_bd_addr[2] << 8) + connected_bd_addr[3],
-                 (connected_bd_addr[4] << 8) + connected_bd_addr[5]);
+        is_ble_sec_conn = true;
+        memcpy(last_connected_bda, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
 
-        // 检查设备是否已在白名单中
-        bool device_in_whitelist = false;
-        for (int i = 0; i < whitelist.num_devices; i++)
+        ESP_LOGI(BLE_TAG, "remote BD_ADDR: %08x%04x",
+                 (last_connected_bda[0] << 24) + (last_connected_bda[1] << 16) + (last_connected_bda[2] << 8) + last_connected_bda[3],
+                 (last_connected_bda[4] << 8) + last_connected_bda[5]);
+        ESP_LOGI(BLE_TAG, "address type = %d", param->ble_security.auth_cmpl.addr_type);
+        ESP_LOGI(BLE_TAG, "pair status = %s", param->ble_security.auth_cmpl.success ? "success" : "fail");
+        if (!param->ble_security.auth_cmpl.success)
         {
-            if (memcmp(whitelist.devices[i], connected_bd_addr, sizeof(esp_bd_addr_t)) == 0)
-            {
-                device_in_whitelist = true;
-                break;
-            }
-        }
-
-        // 如果设备不在白名单，添加并保存
-        if (!device_in_whitelist)
-        {
-            if (whitelist.num_devices < MAX_WHITELIST_SIZE)
-            {
-                memcpy(whitelist.devices[whitelist.num_devices], connected_bd_addr, sizeof(esp_bd_addr_t));
-                whitelist.num_devices++;
-                save_whitelist_to_nvs(&whitelist);
-                esp_ble_gap_update_whitelist(true, connected_bd_addr, BLE_WL_ADDR_TYPE_PUBLIC);
-                ESP_LOGI(BLE_TAG, "Device added to whitelist.");
-            }
-            else
-            {
-                ESP_LOGW(BLE_TAG, "Whitelist is full, cannot add device.");
-            }
-        }
-
-        // 如果不在配对模式，设置广播参数为只允许白名单设备
-        if (!pairing_mode)
-        {
-            freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
-            esp_ble_gap_stop_advertising();
-            esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
+            ESP_LOGE(BLE_TAG, "fail reason = 0x%x", param->ble_security.auth_cmpl.fail_reason);
         }
         break;
-
-    case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT: // 处理读取 RSSI 的回调
-        if (param->read_rssi_cmpl.status == ESP_BT_STATUS_SUCCESS)
-        {
-            ESP_LOGI(BLE_TAG, "RSSI for connected device: %d", param->read_rssi_cmpl.rssi);
-            // 在此根据 RSSI 值执行开门操作
-        }
-        else
-        {
-            ESP_LOGE(BLE_TAG, "Failed to read RSSI, status: %d", param->read_rssi_cmpl.status);
-        }
+    case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT:
+        ESP_LOGI(BLE_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, rssi %d", param->read_rssi_cmpl.rssi);
         break;
-
-    default:
-        break;
-    }
-}
-
-void hid_demo_task(void *pvParameters)
-{
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    while (1)
-    {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        if (sec_conn)
-        {
-            ESP_LOGI(BLE_TAG, "Read RSSI value");
-            send_volum_up = true;
-            // uint8_t key_vaule = {HID_KEY_A};
-            // esp_hidd_send_keyboard_value(hid_conn_id, 0, &key_vaule, 1);
-            // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, true);
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            if (send_volum_up)
-            {
-                esp_ble_gap_read_rssi(connected_bd_addr); // 读取 RSSI 值
-                send_volum_up = false;
-                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, false);
-                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, true);
-                // vTaskDelay(3000 / portTICK_PERIOD_MS);
-                // esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, false);
-
-                // // send keyboard value "Hello Freedorm !"
-                // uint8_t key_vaule[] = {HID_KEY_H, HID_KEY_E, HID_KEY_L, HID_KEY_L, HID_KEY_O, HID_KEY_SPACEBAR, HID_KEY_F, HID_KEY_R, HID_KEY_E, HID_KEY_E, HID_KEY_D, HID_KEY_O, HID_KEY_R, HID_KEY_M};
-                // esp_hidd_send_keyboard_value(hid_conn_id, 0, key_vaule, sizeof(key_vaule));
-            }
-        }
-    }
-}
-
-static void dude_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
-{
-    switch (event)
-    {
-    case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
-        ESP_LOGI(BLE_TAG, "Advertisement data set complete, start advertising.");
-        esp_ble_gap_start_advertising(&adv_params);
-        break;
-
-    case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
-        if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS)
-        {
-            ESP_LOGI(BLE_TAG, "Advertising started successfully");
-        }
-        else
-        {
-            ESP_LOGE(BLE_TAG, "Failed to start advertising, error code: %d", param->adv_start_cmpl.status);
-        }
-        break;
-
     default:
         break;
     }
@@ -457,9 +396,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         gl_profile.service_id.id.inst_id = 0x00;
         gl_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
         gl_profile.service_id.id.uuid.uuid.uuid16 = SERVICE_UUID;
-
-        esp_ble_gap_set_device_name(DEVICE_NAME);
-        esp_ble_gap_config_adv_data(&adv_data);
 
         esp_ble_gatts_create_service(gatts_if, &gl_profile.service_id, GATTS_NUM_HANDLE);
         break;
@@ -525,6 +461,36 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         }
         break;
 
+    case ESP_GATTS_CONNECT_EVT: // 设备连接成功
+    {
+        ESP_LOGI(BLE_TAG, "Device connected");
+        // 打印连接设备的所有信息
+        ESP_LOGI(BLE_TAG, "Connection ID: %d", param->connect.conn_id);
+        ESP_LOGI(BLE_TAG, "Link role: %s", param->connect.link_role == 0 ? "master" : "slave");
+        ESP_LOGI(BLE_TAG, "Remote device address: %02x:%02x:%02x:%02x:%02x:%02x",
+                 param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+        ESP_LOGI(BLE_TAG, "Connection handle: %d", param->connect.conn_handle);
+        ESP_LOGI(BLE_TAG, "BLE address type: %s", param->connect.ble_addr_type == 0 ? "public" : "random");
+        ESP_LOGI(BLE_TAG, "Connection interval: %d", param->connect.conn_params.interval);
+        ESP_LOGI(BLE_TAG, "Connection latency: %d", param->connect.conn_params.latency);
+        ESP_LOGI(BLE_TAG, "Connection timeout: %d", param->connect.conn_params.timeout);
+        ESP_LOGI(BLE_TAG, "Connection handle: %d", param->connect.conn_handle);
+
+        // 保存连接设备的地址
+        memcpy(last_connected_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+
+        is_ble_sec_conn = true;
+    }
+    break;
+
+    case ESP_GATTS_DISCONNECT_EVT: // 设备断开连接
+        is_ble_sec_conn = false;
+        ESP_LOGI(BLE_TAG, "Device disconnected, restarting advertising...");
+        esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
+        is_ble_sec_conn = false;
+        break;
+
     default:
         break;
     }
@@ -542,27 +508,6 @@ void ble_module_init(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
-    // 加载白名单
-    if (load_whitelist_from_nvs(&whitelist) == ESP_OK)
-    {
-        ESP_LOGI(BLE_TAG, "Whitelist loaded, num_devices: %d", whitelist.num_devices);
-        for (int i = 0; i < whitelist.num_devices; i++)
-        {
-            esp_ble_gap_update_whitelist(true, whitelist.devices[i], BLE_WL_ADDR_TYPE_PUBLIC);
-            ESP_LOGI(BLE_TAG, "Device %d: %08x%04x", i, (whitelist.devices[i][0] << 24) + (whitelist.devices[i][1] << 16) + (whitelist.devices[i][2] << 8) + whitelist.devices[i][3], (whitelist.devices[i][4] << 8) + whitelist.devices[i][5]);
-        }
-    }
-
-    // 设置广播参数
-    if (whitelist.num_devices == 0)
-    {
-        freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
-    }
-    else
-    {
-        freedorm_pairing_adv_params.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST;
-    }
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
@@ -600,15 +545,13 @@ void ble_module_init(void)
         ESP_LOGE(BLE_TAG, "%s init bluedroid failed", __func__);
     }
 
-    // 注册回调函数
-
-    esp_ble_gap_register_callback(dude_gap_event_handler);
+    /// register the callback function to the gap module
+    esp_ble_gap_register_callback(gap_event_handler);
+    esp_hidd_register_callbacks(hidd_event_callback);
     esp_ble_gatts_register_callback(gatts_event_handler);
     esp_ble_gatts_app_register(0);
-    // esp_ble_gap_register_callback(gap_event_handler);
-    // esp_hidd_register_callbacks(hidd_event_callback);
 
-    /* 设置安全参数 */
+    /* set the security iocap & auth_req & key size & init key response key parameters to the stack*/
     esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND; // bonding with peer device after authentication
     esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;       // set the IO capability to No output No input
     uint8_t key_size = 16;                          // the key size should be 7~16 bytes
@@ -617,11 +560,15 @@ void ble_module_init(void)
     esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+    /* If your BLE device act as a Slave, the init_key means you hope which types of key of the master should distribute to you,
+    and the response key means which key you can distribute to the Master;
+    If your BLE device act as a master, the response key means you hope which types of key of the slave should distribute to you,
+    and the init key means which key you can distribute to the slave. */
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
     pairing_semaphore = xSemaphoreCreateBinary();
     xTaskCreate(&pairing_mode_task, "pairing_mode_task", 2048, NULL, 5, NULL);
 
-    // xTaskCreate(&hid_demo_task, "hid_task", 2048, NULL, 5, NULL);
+    xTaskCreate(&read_rssi_value, "rssi_task", 2048, NULL, 5, NULL);
 }
