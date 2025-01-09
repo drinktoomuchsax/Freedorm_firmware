@@ -21,13 +21,15 @@ extern SemaphoreHandle_t pairing_semaphore;
 
 typedef struct
 {
-    uint8_t num_devices;
-    esp_bd_addr_t devices[MAX_WHITELIST_SIZE];
-} whitelist_t;
+    uint8_t num_of_devices;
+    esp_bd_addr_t bd_addr[MAX_WHITELIST_SIZE];
+    esp_ble_addr_type_t bd_addr_type[MAX_WHITELIST_SIZE];
+} freedorm_ble_whitelist_t;
 
 void ble_module_init(void);
-esp_err_t load_whitelist_from_nvs(whitelist_t *list);
-esp_err_t save_whitelist_to_nvs(whitelist_t *list);
-esp_err_t delete_whitelist_from_nvs(void);
+static esp_err_t load_whitelist_from_nvs(freedorm_ble_whitelist_t *list);
+static esp_err_t save_whitelist_to_nvs(freedorm_ble_whitelist_t *list);
+static esp_err_t delete_whitelist_from_nvs(void);
+static esp_err_t add_device_to_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr, esp_ble_addr_type_t addr_type);
 
 #endif // BLE_MODULE_H
