@@ -89,9 +89,9 @@ static uint32_t wifi_ssid[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi SSID，
 static uint32_t wifi_pass[CHARACTERISTIC_VAL_LEN] = {0}; // 存储 Wi-Fi 密码，小程序传过来的是unicode编码
 
 static bool is_ble_sec_conn = false;
-static esp_bd_addr_t last_connected_bda;      // 已连接蓝牙设备地址，用于存储连接设备的地址
-static esp_ble_addr_type_t last_con_bda_type; // 已连接蓝牙设备地址类型，用于存储连接设备的地址
-static int8_t rssi_threshold = -60;           // RSSI 阈值，超过这个值则开门
+static esp_bd_addr_t last_connected_bda = {0};    // 已连接蓝牙设备地址，用于存储连接设备的地址
+static esp_ble_addr_type_t last_con_bda_type = 0; // 已连接蓝牙设备地址类型，用于存储连接设备的地址
+static int8_t rssi_threshold = -60;               // RSSI 阈值，超过这个值则开门
 SemaphoreHandle_t pairing_semaphore = NULL;
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
@@ -165,20 +165,20 @@ static esp_ble_adv_params_t freedorm_pairing_adv_params = {
 // 快速重连RSSI广播参数
 static esp_ble_adv_params_t freedorm_fast_recon_rssi_adv_params = {
 
-    .adv_int_min = 0x10,                                     // 广播间隔短，方便设备快速发现
-    .adv_int_max = 0x25,                                     // 广播间隔短，方便设备快速发现
+    .adv_int_min = 0x20,                                     // 广播间隔短，方便设备快速发现
+    .adv_int_max = 0x30,                                     // 广播间隔短，方便设备快速发现
     .adv_type = ADV_TYPE_DIRECT_IND_HIGH,                    // 高速直接广播，快速重连
-    .own_addr_type = BLE_ADDR_TYPE_RPA_PUBLIC,               // 基于公有地址的可分辨私有地址，兼顾隐私和快速重连，配对后使用这个
-    .peer_addr = {0x20, 0x03, 0x06, 0x21, 0x69, 0x69},       // 定向广播时，需要对方地址，之后再根据白名单配置
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,                   // 和上面的广播参数一样，不然对方设备无法连接
+    .peer_addr = {0},                                        // 定向广播时，需要对方地址，之后再根据白名单配置
     .peer_addr_type = BLE_ADDR_TYPE_PUBLIC,                  // 定向广播时，需要对方地址，之后再根据白名单配置
     .channel_map = ADV_CHNL_ALL,                             // 所有通道都广播
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_WLST_CON_ANY, // 允许白名单设备扫描，允许任何设备连接
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_WLST, // 允许白名单设备扫描，允许任何设备连接
 };
 
 /* 加载白名单 */
-static esp_err_t load_whitelist_from_nvs(freedorm_ble_whitelist_t *list)
+static esp_err_t load_freedorm_whitelist_from_nvs(freedorm_ble_whitelist_t *list)
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Loading whitelist from NVS...");
+    ESP_LOGI(BLE_WHITELIST_TAG, "Loading Freedorm whitelist from NVS...");
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs_handle);
     if (err != ESP_OK)
@@ -193,7 +193,7 @@ static esp_err_t load_whitelist_from_nvs(freedorm_ble_whitelist_t *list)
 
     if (err == ESP_ERR_NVS_NOT_FOUND)
     {
-        ESP_LOGW(BLE_WHITELIST_TAG, "Whitelist not found in NVS. Initializing empty whitelist.");
+        ESP_LOGW(BLE_WHITELIST_TAG, "Freedorm whitelist not found in NVS. Initializing empty Freedorm whitelist.");
         list->num_of_devices = 0;
         memset(list->bd_addr, 0, sizeof(list->bd_addr));
         memset(list->bd_addr_type, 0, sizeof(list->bd_addr_type));
@@ -201,19 +201,19 @@ static esp_err_t load_whitelist_from_nvs(freedorm_ble_whitelist_t *list)
     }
     else if (err != ESP_OK)
     {
-        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to load whitelist from NVS: %s", esp_err_to_name(err));
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to load Freedorm whitelist from NVS: %s", esp_err_to_name(err));
     }
     else
     {
-        ESP_LOGI(BLE_WHITELIST_TAG, "Whitelist loaded successfully. Devices: %d", list->num_of_devices);
+        ESP_LOGI(BLE_WHITELIST_TAG, "Freedorm whitelist loaded successfully. Devices: %d", list->num_of_devices);
     }
     return err;
 }
 
 /* 保存白名单 */
-static esp_err_t save_whitelist_to_nvs(freedorm_ble_whitelist_t *list)
+static esp_err_t save_freedorm_whitelist_to_nvs(freedorm_ble_whitelist_t *list)
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Saving whitelist to NVS...");
+    ESP_LOGI(BLE_WHITELIST_TAG, "Saving Freedorm whitelist to NVS...");
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK)
@@ -225,7 +225,7 @@ static esp_err_t save_whitelist_to_nvs(freedorm_ble_whitelist_t *list)
     err = nvs_set_blob(nvs_handle, "whitelist", list, sizeof(freedorm_ble_whitelist_t));
     if (err != ESP_OK)
     {
-        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to write whitelist to NVS: %s", esp_err_to_name(err));
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to write Freedorm whitelist to NVS: %s", esp_err_to_name(err));
         nvs_close(nvs_handle);
         return err;
     }
@@ -235,19 +235,19 @@ static esp_err_t save_whitelist_to_nvs(freedorm_ble_whitelist_t *list)
 
     if (err == ESP_OK)
     {
-        ESP_LOGI(BLE_WHITELIST_TAG, "Whitelist saved successfully.");
+        ESP_LOGI(BLE_WHITELIST_TAG, "Freedorm whitelist saved successfully.");
     }
     else
     {
-        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to commit whitelist to NVS: %s", esp_err_to_name(err));
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to commit Freedorm whitelist to NVS: %s", esp_err_to_name(err));
     }
     return err;
 }
 
 /* 删除白名单 */
-static esp_err_t delete_whitelist_from_nvs()
+static esp_err_t delete_freedorm_whitelist_from_nvs()
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Deleting whitelist from NVS...");
+    ESP_LOGI(BLE_WHITELIST_TAG, "Deleting Freedorm whitelist from NVS...");
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK)
@@ -259,11 +259,11 @@ static esp_err_t delete_whitelist_from_nvs()
     err = nvs_erase_key(nvs_handle, "whitelist");
     if (err == ESP_ERR_NVS_NOT_FOUND)
     {
-        ESP_LOGW(BLE_WHITELIST_TAG, "Whitelist not found in NVS, nothing to delete.");
+        ESP_LOGW(BLE_WHITELIST_TAG, "Freedorm whitelist not found in NVS, nothing to delete.");
     }
     else if (err != ESP_OK)
     {
-        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to erase whitelist from NVS: %s", esp_err_to_name(err));
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to erase Freedorm whitelist from NVS: %s", esp_err_to_name(err));
         nvs_close(nvs_handle);
         return err;
     }
@@ -273,7 +273,7 @@ static esp_err_t delete_whitelist_from_nvs()
 
     if (err == ESP_OK)
     {
-        ESP_LOGI(BLE_WHITELIST_TAG, "Whitelist deleted successfully.");
+        ESP_LOGI(BLE_WHITELIST_TAG, "Freedorm whitelist deleted successfully.");
     }
     else
     {
@@ -283,14 +283,14 @@ static esp_err_t delete_whitelist_from_nvs()
 }
 
 /* 添加设备到白名单 */
-static esp_err_t add_device_to_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr, esp_ble_addr_type_t addr_type)
+static esp_err_t add_device_to_freedorm_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr, esp_ble_addr_type_t addr_type)
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Adding device to whitelist...");
+    ESP_LOGI(BLE_WHITELIST_TAG, "Adding device to Freedorm whitelist...");
 
     // 检查是否已达到白名单最大值
     if (whitelist->num_of_devices >= MAX_WHITELIST_SIZE)
     {
-        ESP_LOGW(BLE_WHITELIST_TAG, "Whitelist is full. Cannot add more devices.");
+        ESP_LOGW(BLE_WHITELIST_TAG, "Freedorm whitelist is full. Cannot add more devices.");
         return ESP_ERR_NO_MEM;
     }
 
@@ -299,7 +299,7 @@ static esp_err_t add_device_to_whitelist(freedorm_ble_whitelist_t *whitelist, es
     {
         if (memcmp(whitelist->bd_addr[i], addr, sizeof(esp_bd_addr_t)) == 0)
         {
-            ESP_LOGW(BLE_WHITELIST_TAG, "Device is already in the whitelist.");
+            ESP_LOGW(BLE_WHITELIST_TAG, "Device is already in the Freedorm whitelist.");
             return ESP_OK; // 已存在，直接返回
         }
     }
@@ -310,16 +310,16 @@ static esp_err_t add_device_to_whitelist(freedorm_ble_whitelist_t *whitelist, es
     whitelist->bd_addr_type[index] = addr_type;
     whitelist->num_of_devices++;
 
-    ESP_LOGI(BLE_WHITELIST_TAG, "Device added successfully. Total devices: %d", whitelist->num_of_devices);
+    ESP_LOGI(BLE_WHITELIST_TAG, "Device added successfully into Freedorm whitelist. Total devices: %d", whitelist->num_of_devices);
 
     // 保存到 NVS
-    return save_whitelist_to_nvs(whitelist);
+    return save_freedorm_whitelist_to_nvs(whitelist);
 }
 
 /* 从白名单中移除设备 */
-static esp_err_t remove_device_from_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr)
+static esp_err_t remove_device_from_freedorm_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr)
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Removing device from whitelist...");
+    ESP_LOGI(BLE_WHITELIST_TAG, "Removing device from Freedorm whitelist...");
 
     bool found = false;
 
@@ -342,25 +342,25 @@ static esp_err_t remove_device_from_whitelist(freedorm_ble_whitelist_t *whitelis
             whitelist->bd_addr_type[whitelist->num_of_devices - 1] = 0;
 
             whitelist->num_of_devices--;
-            ESP_LOGI(BLE_WHITELIST_TAG, "Device removed successfully. Total devices: %d", whitelist->num_of_devices);
+            ESP_LOGI(BLE_WHITELIST_TAG, "Device removed successfully form Freedorm whitelist. Total devices: %d", whitelist->num_of_devices);
             break;
         }
     }
 
     if (!found)
     {
-        ESP_LOGW(BLE_WHITELIST_TAG, "Device not found in the whitelist.");
+        ESP_LOGW(BLE_WHITELIST_TAG, "Device not found in the Freedorm whitelist.");
         return ESP_ERR_NOT_FOUND;
     }
 
     // 保存到 NVS
-    return save_whitelist_to_nvs(whitelist);
+    return save_freedorm_whitelist_to_nvs(whitelist);
 }
 
 /* 打印白名单 */
-static void print_whitelist(freedorm_ble_whitelist_t *whitelist)
+static void print_freedorm_whitelist(freedorm_ble_whitelist_t *whitelist)
 {
-    ESP_LOGI(BLE_WHITELIST_TAG, "Printing whitelist. Total devices: %d", whitelist->num_of_devices);
+    ESP_LOGI(BLE_WHITELIST_TAG, "Printing Freedorm whitelist. Total devices: %d", whitelist->num_of_devices);
 
     for (uint8_t i = 0; i < whitelist->num_of_devices; i++)
     {
@@ -375,6 +375,44 @@ static void print_whitelist(freedorm_ble_whitelist_t *whitelist)
     }
 }
 
+// 添加设备到 GAP 白名单
+static void add_device_to_gap_whitelist(esp_bd_addr_t bd_addr, esp_ble_addr_type_t addr_type)
+{
+    esp_err_t err = esp_ble_gap_update_whitelist(ESP_BLE_WHITELIST_ADD, bd_addr, addr_type);
+    if (err == ESP_OK)
+    {
+        ESP_LOGI(BLE_WHITELIST_TAG, "Device added to GAP whitelist: %02X:%02X:%02X:%02X:%02X:%02X",
+                 bd_addr[0], bd_addr[1], bd_addr[2], bd_addr[3], bd_addr[4], bd_addr[5]);
+    }
+    else
+    {
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to add device to GAP whitelist: %s", esp_err_to_name(err));
+    }
+}
+
+static void print_gap_whitelist_size()
+{
+    uint8_t num_devices = 0;
+
+    // 获取白名单中的设备数量
+    esp_err_t err = esp_ble_gap_get_whitelist_size(&num_devices);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(BLE_WHITELIST_TAG, "Failed to get GAP whitelist size: %s", esp_err_to_name(err));
+        return;
+    }
+    else
+    {
+        ESP_LOGI(BLE_WHITELIST_TAG, "GAP whitelist size: %d", num_devices);
+    }
+
+    if (num_devices == 0)
+    {
+        ESP_LOGW(BLE_WHITELIST_TAG, "GAP whitelist is empty.");
+        return;
+    }
+}
+
 /* 清空白名单 */
 static esp_err_t clear_whitelist(freedorm_ble_whitelist_t *whitelist)
 {
@@ -384,7 +422,74 @@ static esp_err_t clear_whitelist(freedorm_ble_whitelist_t *whitelist)
     memset(whitelist->bd_addr_type, 0, sizeof(whitelist->bd_addr_type));
 
     // 从 NVS 删除白名单
-    return delete_whitelist_from_nvs();
+    return delete_freedorm_whitelist_from_nvs();
+}
+
+static bool is_last_connected_bda_valid()
+{
+    // 如果数组的内容全为 0，则认为地址无效
+    for (int i = 0; i < ESP_BD_ADDR_LEN; i++)
+    {
+        if (last_connected_bda[i] != 0)
+        {
+            return true; // 有效地址
+        }
+    }
+    return false; // 地址无效
+}
+
+// 在需要时主动断开连接
+static void disconnect_from_central()
+{
+    if (is_last_connected_bda_valid())
+    { // 确保有有效的连接
+        esp_err_t err = esp_ble_gap_disconnect(last_connected_bda);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI("BLE", "Disconnected from Central device successfully.");
+        }
+        else
+        {
+            ESP_LOGE("BLE", "Failed to disconnect (err: %s)", esp_err_to_name(err));
+        }
+    }
+    else
+    {
+        ESP_LOGW("BLE", "No active connection to disconnect.");
+    }
+}
+
+static void start_directed_advertising()
+{
+    if ((last_con_bda_type != 0) && is_last_connected_bda_valid())
+    {
+        ESP_LOGI(BLE_GAP_TAG, "Starting directed advertising for quick reconnect...");
+
+        // 动态设置目标设备地址
+        memcpy(freedorm_fast_recon_rssi_adv_params.peer_addr, last_connected_bda, sizeof(esp_bd_addr_t));
+        freedorm_fast_recon_rssi_adv_params.peer_addr_type = last_con_bda_type;
+
+        ESP_LOGI(BLE_GAP_TAG, "Directed advertising target: %02X:%02X:%02X:%02X:%02X:%02X",
+                 freedorm_fast_recon_rssi_adv_params.peer_addr[0], freedorm_fast_recon_rssi_adv_params.peer_addr[1],
+                 freedorm_fast_recon_rssi_adv_params.peer_addr[2], freedorm_fast_recon_rssi_adv_params.peer_addr[3],
+                 freedorm_fast_recon_rssi_adv_params.peer_addr[4], freedorm_fast_recon_rssi_adv_params.peer_addr[5]);
+        ESP_LOGI(BLE_GAP_TAG, "Directed advertising target type: %d", freedorm_fast_recon_rssi_adv_params.peer_addr_type);
+
+        // 启动定向广播
+        esp_err_t err = esp_ble_gap_start_advertising(&freedorm_fast_recon_rssi_adv_params);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(BLE_GAP_TAG, "Directed advertising started successfully.");
+        }
+        else
+        {
+            ESP_LOGE(BLE_GAP_TAG, "Failed to start directed advertising: %s", esp_err_to_name(err));
+        }
+    }
+    else
+    {
+        ESP_LOGW(BLE_GAP_TAG, "No connected device info. Directed advertising not started.");
+    }
 }
 
 // 工具函数：将 UTF-32 转换为 UTF-8
@@ -575,6 +680,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     case ESP_GAP_BLE_AUTH_CMPL_EVT: // 配对之后触发的事件，在这里储存白名单
         is_ble_sec_conn = true;
         memcpy(last_connected_bda, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
+        add_device_to_gap_whitelist(last_connected_bda, last_con_bda_type);
         last_con_bda_type = param->ble_security.auth_cmpl.addr_type;
 
         ESP_LOGI(BLE_GAP_TAG, "remote BD_ADDR: %08x%04x",
@@ -588,12 +694,35 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         }
 
         // 添加进入白名单
-        add_device_to_whitelist(&whitelist, last_connected_bda, last_con_bda_type);
-        print_whitelist(&whitelist);
+        add_device_to_freedorm_whitelist(&whitelist, last_connected_bda, last_con_bda_type);
+        print_freedorm_whitelist(&whitelist);
+        print_gap_whitelist_size();
 
         break;
     case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT:
         ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, rssi %d", param->read_rssi_cmpl.rssi);
+        break;
+
+    case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+        if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS)
+        {
+            ESP_LOGE(BLE_GAP_TAG, "Advertising start failed: %s", esp_err_to_name(param->adv_start_cmpl.status));
+        }
+        else
+        {
+            ESP_LOGI(BLE_GAP_TAG, "Advertising start successfully.");
+        }
+        break;
+
+    case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+        if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS)
+        {
+            ESP_LOGE(BLE_GAP_TAG, "Advertising stop failed: %s", esp_err_to_name(param->adv_stop_cmpl.status));
+        }
+        else
+        {
+            ESP_LOGI(BLE_GAP_TAG, "Advertising stop successfully.");
+        }
         break;
     default:
         break;
@@ -720,8 +849,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     case ESP_GATTS_DISCONNECT_EVT: // 设备断开连接
         is_ble_sec_conn = false;
         ESP_LOGI(BLE_GATT_TAG, "Device disconnected, restarting advertising...");
-        esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
-        is_ble_sec_conn = false;
+
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+        start_directed_advertising();
+        // esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
         break;
 
     default:

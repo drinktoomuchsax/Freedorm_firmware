@@ -27,9 +27,9 @@ typedef struct
 } freedorm_ble_whitelist_t;
 
 void ble_module_init(void);
-static esp_err_t load_whitelist_from_nvs(freedorm_ble_whitelist_t *list);
-static esp_err_t save_whitelist_to_nvs(freedorm_ble_whitelist_t *list);
-static esp_err_t delete_whitelist_from_nvs(void);
-static esp_err_t add_device_to_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr, esp_ble_addr_type_t addr_type);
+static esp_err_t load_freedorm_whitelist_from_nvs(freedorm_ble_whitelist_t *list);
+static esp_err_t save_freedorm_whitelist_to_nvs(freedorm_ble_whitelist_t *list);
+static esp_err_t delete_freedorm_whitelist_from_nvs(void);
+static esp_err_t add_device_to_freedorm_whitelist(freedorm_ble_whitelist_t *whitelist, esp_bd_addr_t addr, esp_ble_addr_type_t addr_type);
 
 #endif // BLE_MODULE_H
