@@ -490,6 +490,7 @@ static void ws2812b_effect_task(void *arg)
 
         case LED_EFFECT_OPEN_BLUETOOTH_NEARBY:
             ws2812b_led_waterfall((ws2812b_color_rgb_t)BLUE_RGB, 1000);
+            ws2812b_led_set_color_all((ws2812b_color_rgb_t)BLUE_RGB, TIME_BLE_RECOVER_TEMP_OPEN);
             break;
 
         case LED_EFFECT_OPEN_BLUETOOTH_FINISHED:

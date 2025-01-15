@@ -15,8 +15,9 @@
 #define OUTPUT_LED_D4 GPIO_NUM_12
 #define OUTPUT_LED_D5 GPIO_NUM_13
 
-#define TIME_RECOVER_TEMP_OPEN 10 * 60 * 1000 // 定义超时时间 (ms)
-#define TIME_RECOVER_LOCK 10 * 60 * 1000      // 定义超时时间 (ms)
+#define TIME_RECOVER_TEMP_OPEN 10 * 60 * 1000      // 定义超时时间 (ms)
+#define TIME_BLE_RECOVER_TEMP_OPEN 0.5 * 60 * 1000 // 定义超时时间 (ms)
+#define TIME_RECOVER_LOCK 10 * 60 * 1000           // 定义超时时间 (ms)
 
 typedef enum
 {
@@ -27,6 +28,8 @@ typedef enum
     STATE_LOCKED,         // 门锁定状态，任何卡都刷不开
     STATE_TEMP_OPEN_END,
     STATE_LOCK_END,
+    STATE_BLE_TEMP_OPEN,
+    STATE_BLE_TEMP_OPEN_END,
 } lock_status_t;
 
 // 定义门锁控制命令类型

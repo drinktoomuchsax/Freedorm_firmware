@@ -9,16 +9,19 @@ typedef enum
 {
     OPEN_MODE_ONCE,
     OPEN_MODE_ALWAYS,
+    OPEN_MODE_ONCE_BLE,
 } open_mode_t;
 
 static lock_status_t current_lock_state = STATE_NORAML_DEFAULT;
 static TimerHandle_t temp_open_timer = NULL;
+static TimerHandle_t ble_temp_open_timer = NULL;
 static TimerHandle_t lock_timer = NULL;
 
 // 状态切换函数声明
 void transition_to_state(lock_status_t new_state);
 
 void transition_to_STATE_TEMP_OPEN_END();
+void transition_to_STATE_BLE_TEMP_OPEN_END();
 
 // 状态处理函数声明
 void handle_power_on_black();
@@ -75,6 +78,15 @@ void start_timer_temp_open()
         temp_open_timer = xTimerCreate("TempOpenTimer", pdMS_TO_TICKS(TIME_RECOVER_TEMP_OPEN), pdFALSE, NULL, (TimerCallbackFunction_t)transition_to_STATE_TEMP_OPEN_END);
     }
     xTimerStart(temp_open_timer, 0);
+}
+
+void start_timer_ble_temp_open()
+{
+    if (ble_temp_open_timer == NULL)
+    {
+        ble_temp_open_timer = xTimerCreate("BleTempOpenTimer", pdMS_TO_TICKS(TIME_BLE_RECOVER_TEMP_OPEN), pdFALSE, NULL, (TimerCallbackFunction_t)transition_to_STATE_BLE_TEMP_OPEN_END);
+    }
+    xTimerStart(ble_temp_open_timer, 0);
 }
 
 void start_timer_lock()
@@ -166,6 +178,11 @@ void lock_control_task(void *pvParameters)
                 {
                     lock_set_lock();
                 }
+                else if (event == BLE_BUTTON_EVENT_SINGLE_CLICK)
+                {
+                    lock_set_open(OPEN_MODE_ONCE_BLE);
+                }
+
                 break;
             case STATE_TEMP_OPEN:
                 if (event == BUTTON_EVENT_SINGLE_CLICK)
@@ -198,6 +215,24 @@ void lock_control_task(void *pvParameters)
                     lock_set_normal();
                 }
                 break;
+
+            case STATE_BLE_TEMP_OPEN:
+                if (event == BUTTON_EVENT_SINGLE_CLICK)
+                {
+                    transition_to_STATE_BLE_TEMP_OPEN_END();
+                }
+                else if (event == BUTTON_EVENT_DOUBLE_CLICK)
+                {
+                    lock_set_open(OPEN_MODE_ALWAYS); // 双击进入常开模式
+                }
+                break;
+
+            case STATE_BLE_TEMP_OPEN_END:
+                ws2812b_switch_effect(LED_EFFECT_OPEN_BLUETOOTH_FINISHED); // 开门结束的闪烁
+                vTaskDelay(pdMS_TO_TICKS(600));
+                lock_set_normal();
+
+                break;
             default:
                 break;
             }
@@ -216,6 +251,13 @@ void transition_to_STATE_TEMP_OPEN_END()
 {
     reset_timer(&temp_open_timer); // 关闭单次开门设置的定时器
     transition_to_state(STATE_TEMP_OPEN_END);
+    send_button_event(BUTTON_EVENT_NONE_UPDATE_LOCK_CONTROL);
+}
+
+void transition_to_STATE_BLE_TEMP_OPEN_END()
+{
+    reset_timer(&ble_temp_open_timer); // 关闭单次开门设置的定时器
+    transition_to_state(STATE_BLE_TEMP_OPEN_END);
     send_button_event(BUTTON_EVENT_NONE_UPDATE_LOCK_CONTROL);
 }
 
@@ -262,6 +304,12 @@ void lock_set_open(open_mode_t open_mode)
     {
         ws2812b_switch_effect(LED_EFFECT_ALWAYS_OPEN_MODE);
         transition_to_state(STATE_ALWAYS_OPEN);
+    }
+    else if (open_mode == OPEN_MODE_ONCE_BLE)
+    {
+        start_timer_ble_temp_open(); // 开启定时器，TIME_RECOVER_TEMP_OPEN秒后恢复到正常状态
+        ws2812b_switch_effect(LED_EFFECT_OPEN_BLUETOOTH_NEARBY);
+        transition_to_state(STATE_BLE_TEMP_OPEN);
     }
 }
 

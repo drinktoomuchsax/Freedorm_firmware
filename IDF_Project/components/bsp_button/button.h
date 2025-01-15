@@ -23,6 +23,7 @@ typedef enum
     BUTTON_EVENT_PRESS_REPEAT,
     BUTTON_EVENT_PRESS_DOWN,
     BUTTON_EVENT_PRESS_UP,
+    BLE_BUTTON_EVENT_SINGLE_CLICK,
     BUTTON_EVENT_NONE_UPDATE_LOCK_CONTROL // 没有按键事件，用来更新lock_control状态机
 } button_event_t;
 
