@@ -72,7 +72,7 @@
 
 static uint16_t hid_conn_id = 0;
 
-#define FREEDORM_DEVICE_NAME "Freedorm Pro (SB77)"
+#define FREEDORM_DEVICE_NAME "Freedorm Pro (SDM06)"
 
 // UUID 定义
 #define SERVICE_UUID 0xFF69
@@ -604,25 +604,17 @@ static void log_bonded_dev(void)
     }
 }
 
-static connection_rssi_data_t *initialize_connection_data(esp_bd_addr_t remote_bda)
+static int8_t find_i_in_rssi_task_list(esp_bd_addr_t remote_bda)
 {
     for (int i = 0; i < MAX_CONNECTIONS; i++)
     {
-        if (connection_data[i].task_handle == NULL)
-        { // 找到空闲的连接槽位
-            memset(&connection_data[i], 0, sizeof(connection_rssi_data_t));
-            memcpy(connection_data[i].remote_bda, remote_bda, sizeof(esp_bd_addr_t));
-            connection_data[i].rssi_slope_threshold = 4.69; // 默认值
-            connection_data[i].rssi_index = 0;
-            connection_data[i].smoothed_rssi = -65; // 默认值
-            connection_data[i].rssi_trend = RSSI_TREND_STABLE;
-            connection_data[i].dude_rssi_index = 0;
-            connection_data[i].rssi_count = 0;
-            memset(connection_data[i].rssi_window, -60, sizeof(connection_data[i].rssi_window)); // 默认 RSSI 滑动窗口值
-            return &connection_data[i];
+        if (memcmp(rssi_task_list[i].remote_bda, remote_bda, sizeof(esp_bd_addr_t)) == 0)
+        {
+            return i;
+            break;
         }
     }
-    return NULL; // 没有空闲槽位
+    return -1;
 }
 
 /**
@@ -631,42 +623,50 @@ static connection_rssi_data_t *initialize_connection_data(esp_bd_addr_t remote_b
  * @param new_rssi 新采集到的RSSI值
  * @return int8_t 平滑后的RSSI值
  */
-static uint8_t dude_rssi_index = 0;                      // 当前滑动窗口的索引
-static uint8_t rssi_count = 0;                           // 当前已存储的RSSI值数量（小于等于窗口大小）
-static int8_t rssi_window[RSSI_AVG_WINDOW_SIZE] = {-60}; // 滑动窗口数组，存储最近的RSSI值
-int8_t calculate_sliding_average(int8_t new_rssi)
+static int8_t calculate_sliding_average(int8_t new_rssi, esp_bd_addr_t remote_bda)
 {
 
+    int j = find_i_in_rssi_task_list(remote_bda);
     // 将新值加入滑动窗口
-    rssi_window[dude_rssi_index] = new_rssi;
+    rssi_task_list[j].rssi_window[rssi_task_list[j].dude_rssi_index] = new_rssi;
 
     // 更新滑动窗口索引
-    dude_rssi_index = (dude_rssi_index + 1) % RSSI_AVG_WINDOW_SIZE;
+    rssi_task_list[j].dude_rssi_index = (rssi_task_list[j].dude_rssi_index + 1);
+    rssi_task_list[j].dude_rssi_index %= RSSI_AVG_WINDOW_SIZE;
 
-    // 更新已存储的RSSI值数量（最多等于窗口大小）
-    if (rssi_count < RSSI_AVG_WINDOW_SIZE)
+    // 更新已存储的 RSSI 值数量
+    if (rssi_task_list[j].rssi_count < RSSI_AVG_WINDOW_SIZE)
     {
-        rssi_count++;
+        rssi_task_list[j].rssi_count++;
     }
 
     // 计算滑动平均值
     int32_t sum = 0;
-    for (uint8_t i = 0; i < rssi_count; i++)
+    for (uint8_t i = 0; i < rssi_task_list[j].rssi_count; i++)
     {
-        sum += rssi_window[i];
+        sum += rssi_task_list[j].rssi_window[i];
     }
 
-    return (int8_t)(sum / rssi_count);
+    return (int8_t)(sum / rssi_task_list[j].rssi_count);
 }
 
 const float RSSI_SLOPE_THRESHOLD = 4.69;
-static int8_t rssi_history[RSSI_SLOPE_COUNT] = {0}; // 保存最近的 RSSI 数据
-static uint16_t rssi_index = 0;                     // 当前写入的索引
-rssi_trend_t evaluate_rssi_trend_regression(int8_t current_rssi)
+rssi_trend_t evaluate_rssi_trend_regression(int8_t current_rssi, esp_bd_addr_t remote_bda)
 {
+
+    int j = find_i_in_rssi_task_list(remote_bda);
+
     // 更新 RSSI 历史记录
-    rssi_history[rssi_index] = current_rssi;
-    rssi_index = (rssi_index + 1) % RSSI_SLOPE_COUNT;
+    rssi_task_list[j].rssi_history[rssi_task_list[j].rssi_index] = current_rssi;
+    rssi_task_list[j].rssi_index = (rssi_task_list[j].rssi_index + 1) % RSSI_SLOPE_COUNT;
+
+    // ESP_LOGI(BLE_TAG, "RSSI history:");
+    // for (uint8_t i = 0; i < RSSI_SLOPE_COUNT; i++)
+    // {
+    //     ESP_LOGI(BLE_TAG, "RSSI[%d]: %d", i, rssi_task_list[j].rssi_history[i]);
+    // }
+
+    // ESP_LOGI(BLE_TAG, "RSSI index: %d", rssi_task_list[j].rssi_index);
 
     // 线性回归变量
     int16_t sum_x = 0;  // 时间索引的和
@@ -676,7 +676,7 @@ rssi_trend_t evaluate_rssi_trend_regression(int8_t current_rssi)
 
     for (uint8_t i = 0; i < RSSI_SLOPE_COUNT; i++)
     {
-        int8_t y = rssi_history[(rssi_index + i) % RSSI_SLOPE_COUNT];
+        int8_t y = rssi_task_list[j].rssi_history[(rssi_task_list[j].rssi_index + i) % RSSI_SLOPE_COUNT];
         int8_t x = i; // 时间索引
 
         sum_x += x;
@@ -798,6 +798,9 @@ static void monitor_rssi_task(void *pvParameters)
     rssi_monitor_params_t *params = (rssi_monitor_params_t *)pvParameters;
     esp_bd_addr_t remote_bda = {0};
     memcpy(remote_bda, params->remote_bda, sizeof(esp_bd_addr_t));
+
+    int j = find_i_in_rssi_task_list(remote_bda);
+
     while (1)
     {
         if (params->is_ble_sec_conn)
@@ -813,9 +816,9 @@ static void monitor_rssi_task(void *pvParameters)
                 break;
             }
 
-            if (ble_rssi_trend == RSSI_TREND_APPROACHING)
+            if (rssi_task_list[j].ble_rssi_trend == RSSI_TREND_APPROACHING)
             {
-                unlock_if_rssi_valid(smoothed_rssi);
+                unlock_if_rssi_valid(rssi_task_list[j].smoothed_rssi);
             }
             else // 保持不动或者远离
             {
@@ -910,12 +913,13 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 
         break;
     case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT:
-        ESP_LOGD(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, rssi %d", param->read_rssi_cmpl.rssi);
+        int j = find_i_in_rssi_task_list(param->read_rssi_cmpl.remote_addr);
 
-        smoothed_rssi = calculate_sliding_average(param->read_rssi_cmpl.rssi);
-        ble_rssi_trend = evaluate_rssi_trend_regression(smoothed_rssi);
-        ESP_LOGD(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, rssi %d", smoothed_rssi);
-        ESP_LOGD(BLE_GAP_TAG, "RSSI trend: %d", ble_rssi_trend);
+        rssi_task_list[j].smoothed_rssi = calculate_sliding_average(param->read_rssi_cmpl.rssi, param->read_rssi_cmpl.remote_addr);
+        ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, smoothed RSSI of the remote device %d: %d", j, rssi_task_list[j].smoothed_rssi);
+        rssi_task_list[j].ble_rssi_trend = evaluate_rssi_trend_regression(rssi_task_list[j].smoothed_rssi, param->read_rssi_cmpl.remote_addr);
+
+        ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, RSSI of the remote device %d: %d RSSI trend: %d", j, param->read_rssi_cmpl.rssi, rssi_task_list[j].ble_rssi_trend);
 
         break;
 
@@ -1068,8 +1072,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         memcpy(params->remote_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
         params->conn_id = param->connect.conn_id;
         params->is_ble_sec_conn = true;
-        params->ble_rssi_trend = RSSI_TREND_STABLE;
-        params->smoothed_rssi = -69;
 
         // 启动任务
         for (int i = 0; i < MAX_CONNECTIONS; i++)
