@@ -15,15 +15,17 @@
 // 定义按键事件枚举
 typedef enum
 {
-    BUTTON_EVENT_SINGLE_CLICK,
-    BUTTON_EVENT_DOUBLE_CLICK,
-    BUTTON_EVENT_MULTI_CLICK,
-    BUTTON_EVENT_LONG_PRESS_START,
-    BUTTON_EVENT_LONG_PRESS_HOLD,
-    BUTTON_EVENT_PRESS_REPEAT,
-    BUTTON_EVENT_PRESS_DOWN,
-    BUTTON_EVENT_PRESS_UP,
-    BLE_BUTTON_EVENT_SINGLE_CLICK,
+    BUTTON_EVENT_SINGLE_CLICK,            // 单击
+    BUTTON_EVENT_DOUBLE_CLICK,            // 双击
+    BUTTON_EVENT_MULTI_CLICK,             // 大于三次点击
+    BUTTON_EVENT_LONG_PRESS_START,        // 长按开始
+    BUTTON_EVENT_LONG_PRESS_HOLD_3S,      // 这里是hold 3s，加上长按开始的2s，总共按下5s后会触发
+    BUTTON_EVENT_LONG_PRESS_HOLD_4S,      // 同上
+    BUTTON_EVENT_LONG_PRESS_HOLD_6S,      // 同上
+    BUTTON_EVENT_LONG_PRESS_END,          // 长按结束
+    BUTTON_EVENT_PRESS_DOWN,              // 按下按钮
+    BUTTON_EVENT_PRESS_UP,                // 释放按钮
+    BLE_BUTTON_EVENT_SINGLE_CLICK,        // BLE靠近开门
     BUTTON_EVENT_NONE_UPDATE_LOCK_CONTROL // 没有按键事件，用来更新lock_control状态机
 } button_event_t;
 

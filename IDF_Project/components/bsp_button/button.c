@@ -15,13 +15,37 @@ QueueHandle_t button_event_queue = NULL;
 
 // 定义局部变量
 static bool flag_long_press_start = false;
-// static bool flag_ble_start_pairing = false;
-static TimerHandle_t long_press_ble_timer = NULL;
+static TimerHandle_t long_press_timer = NULL; // 长按计时器，用来判断长按的时间
+static int16_t long_press_duration = 0;       // 用于记录长按的时间
 
 // 函数声明
+
+/**
+ * @brief 开始蓝牙配对，发送给ble_module一个信号量
+ *
+ */
 void ble_start_pairing(void);
 
-// 按键事件发送函数
+/**
+ * @brief 新增的计时器回调函数，每秒给lock_control发送一个长按事件
+ *
+ */
+void long_press_timer_callback();
+
+/**
+ * @brief 用来启动长按计时器回调函数，每秒重载一次，给lock_control发送长按事件
+ *
+ */
+void start_long_press_timer();
+
+// 停止长按计时器，结束给lock_control发送长按事件
+void stop_long_press_timer();
+
+/**
+ * @brief 发送 button_event_t 事件给lock_control状态机
+ *
+ * @param event
+ */
 void send_button_event(button_event_t event)
 {
     if (button_event_queue != NULL)
@@ -113,9 +137,9 @@ void BTN1_DOUBLE_CLICK_Handler(void *btn)
 void BTN1_LONG_PRESS_START_Handler(void *btn)
 {
     ESP_LOGI(BUTTON_TAG, "Long press start detected");
-    long_press_ble_timer = xTimerCreate("long_press_ble_timer", 6000 / portTICK_PERIOD_MS, pdFALSE, NULL, (TimerCallbackFunction_t)ble_start_pairing);
-    xTimerStart(long_press_ble_timer, 0);
-    ws2812b_switch_effect(LED_EFFECT_BLE_TRY_PAIRING);
+    send_button_event(BUTTON_EVENT_LONG_PRESS_START);
+    start_long_press_timer();
+
     flag_long_press_start = true;
 }
 
@@ -141,9 +165,13 @@ void BTN1_PRESS_UP_Handler(void *btn)
     if (flag_long_press_start) // 长按之后的抬起就是长按结束
     {
         ESP_LOGI(BUTTON_TAG, "Long press end detected");
-        xTimerStop(long_press_ble_timer, 0);
-        xTimerDelete(long_press_ble_timer, 0);
-        ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+        stop_long_press_timer();     // 停止长按计时器，结束计时
+        stop_ble_long_press_timer(); // 停止进入蓝牙配对模式，结束计时
+
+        if (flag_ble_start_pairing == false && (get_current_lock_state() == STATE_NORAML_DEFAULT)) // 防止在其他状态下长按进入蓝牙配对模式
+        {
+            ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE); // 原本是用来打断蓝牙配对动画的，但是和上电动画冲突，所以这里用一个标志位来判断
+        }
         flag_long_press_start = false;
     }
 }
@@ -153,7 +181,53 @@ void ble_start_pairing(void)
     xTimerStop(long_press_ble_timer, 0);
     xTimerDelete(long_press_ble_timer, 0);
 
-    flag_long_press_start = false; // 清楚长按标志，防止放手之后去到默认灯效
+    flag_long_press_start = false; // 清除长按标志，防止放手之后去到默认灯效
+
     xSemaphoreGive(pairing_semaphore);
     ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
+}
+
+void long_press_timer_callback()
+{
+    long_press_duration++;
+    if (long_press_duration == 3)
+    {
+        send_button_event(BUTTON_EVENT_LONG_PRESS_HOLD_3S);
+        ESP_LOGI(BUTTON_TAG, "Long press hold 3s detected");
+    }
+    else if (long_press_duration == 4)
+    {
+        send_button_event(BUTTON_EVENT_LONG_PRESS_HOLD_4S);
+        ESP_LOGI(BUTTON_TAG, "Long press hold 4s detected");
+    }
+    else if (long_press_duration == 6)
+    {
+        send_button_event(BUTTON_EVENT_LONG_PRESS_HOLD_6S);
+        ESP_LOGI(BUTTON_TAG, "Long press hold 6s detected");
+    }
+}
+
+void start_long_press_timer()
+{
+    // 自动重载定时器，每秒触发一次
+    long_press_timer = xTimerCreate("long_press_timer", 1000 / portTICK_PERIOD_MS, pdTRUE, NULL, long_press_timer_callback);
+    if (long_press_timer != NULL)
+    {
+        xTimerStart(long_press_timer, 0);
+    }
+    else
+    {
+        ESP_LOGE(BUTTON_TAG, "Failed to create long press timer");
+    }
+}
+
+void stop_long_press_timer()
+{
+    if (long_press_timer != NULL)
+    {
+        xTimerStop(long_press_timer, 0);
+        xTimerDelete(long_press_timer, 0);
+        long_press_timer = NULL;
+        long_press_duration = 0;
+    }
 }
