@@ -63,6 +63,6 @@ void app_main(void)
     ble_module_init();
     ws2812b_led_init(); // 按键在之后初始化，因为按键依赖ws2812b中的消息队列，TODO: 好像后面没用到消息队列来传递效果了，可以看看是否有这个顺序要求
     freedorm_button_init();
-    lock_control_init();
+    lock_control_init(); // 为了主函数不是太拥挤，大部分状态机都放到了lock_control.c中
     xTaskCreate(&button_task, "button_task", 2048, NULL, 1, NULL);
 }

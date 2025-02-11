@@ -13,9 +13,10 @@ typedef enum
 } open_mode_t;
 
 static lock_status_t current_lock_state = STATE_NORAML_DEFAULT;
-static TimerHandle_t temp_open_timer = NULL;
-static TimerHandle_t ble_temp_open_timer = NULL;
-static TimerHandle_t lock_timer = NULL;
+static TimerHandle_t temp_open_timer = NULL;      // 用来恢复临时开门状态的定时器
+static TimerHandle_t ble_temp_open_timer = NULL;  // 用来恢复蓝牙临时开门状态的定时器
+static TimerHandle_t lock_timer = NULL;           // 用来恢复锁定状态的定时器
+static TimerHandle_t long_press_ble_timer = NULL; // 蓝牙长按计时器，用来判断是否进入蓝牙配对模式
 
 // 状态切换函数声明
 void transition_to_state(lock_status_t new_state);
@@ -46,6 +47,18 @@ void lock_set_open(open_mode_t open_mode);
  */
 void lock_set_lock();
 void start_timer_temp_open();
+
+/**
+ * @brief 开始蓝牙长按计时器，6s之后进入蓝牙配对模式
+ *
+ */
+void start_ble_long_press_timer();
+
+/**
+ * @brief 停止蓝牙长按计时器，不用进入蓝牙配对模式
+ *
+ */
+void stop_ble_long_press_timer();
 
 /* 工具函数声明和定义 */
 static const char *get_lock_state_name(lock_status_t state)
@@ -136,7 +149,7 @@ void lock_control_init(void)
 
     gpio_set_level(CTL_LOCK, 1); // 默认恢复LOCK线到开漏状态，不对门锁模块产生影响
 
-    // 初始化状态机
+    // 初始化状态为上电之后的黑屏状态，但是具体的上电灯效是在ws2812component里做的
     transition_to_state(STATE_POWER_ON_BLACK);
 
     // 初始化按键事件队列
@@ -151,7 +164,14 @@ void lock_control_init(void)
     xTaskCreate(lock_control_task, "lock_control_task", 2048, NULL, 10, NULL);
 }
 
-// 状态机主任务
+/**
+ * @brief 主状态机，具体图维护在sax的mermaid账号中
+ * // [MermaidChart: dbe783ad-e5ab-4b68-8150-56c056ea9093]
+ *
+ * 如何移植灯效控制到状态机中？
+ *
+ * @param pvParameters
+ */
 void lock_control_task(void *pvParameters)
 {
     button_event_t event;
@@ -163,7 +183,11 @@ void lock_control_task(void *pvParameters)
             switch (current_lock_state)
             {
             case STATE_POWER_ON_BLACK:
-                handle_power_on_black();
+                if (event == BUTTON_EVENT_LONG_PRESS_HOLD_3S)
+                {
+                    handle_power_on_black();
+                }
+
                 break;
             case STATE_NORAML_DEFAULT:
                 if (event == BUTTON_EVENT_SINGLE_CLICK)
@@ -181,6 +205,10 @@ void lock_control_task(void *pvParameters)
                 else if (event == BLE_BUTTON_EVENT_SINGLE_CLICK)
                 {
                     lock_set_open(OPEN_MODE_ONCE_BLE);
+                }
+                else if (event == BUTTON_EVENT_LONG_PRESS_START)
+                {
+                    start_ble_long_press_timer();
                 }
 
                 break;
@@ -232,6 +260,29 @@ void lock_control_task(void *pvParameters)
                 vTaskDelay(pdMS_TO_TICKS(600));
                 lock_set_normal();
 
+                break;
+
+            case STATE_BLE_PAIRING_PREPARE:
+                // if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S)
+                // {
+                //     transition_to_state(STATE_BLE_PAIRING_IN_PROGRESS);
+                //     ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
+                // }
+                break;
+
+            case STATE_BLE_PAIRING_IN_PROGRESS:
+                // if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S)
+                // {
+                //     transition_to_state(STATE_BLE_PAIRING_TIME_OUT);
+                //     ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_TIMEOUT);
+                // }
+                break;
+            case STATE_BLE_PAIRING_TIME_OUT:
+                // if (event == BUTTON_EVENT_SINGLE_CLICK)
+                // {
+                //     transition_to_state(STATE_NORAML_DEFAULT);
+                //     ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+                // }
                 break;
             default:
                 break;
@@ -325,4 +376,34 @@ void lock_set_normal(void)
     // 灯效和状态机切换到正常状态
     ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
     transition_to_state(STATE_NORAML_DEFAULT);
+}
+
+lock_status_t get_current_lock_state()
+{
+    return current_lock_state;
+}
+
+void start_ble_long_press_timer()
+{
+    long_press_ble_timer = xTimerCreate("long_press_ble_timer", 6000 / portTICK_PERIOD_MS, pdFALSE, NULL, (TimerCallbackFunction_t)ble_start_pairing);
+    if (long_press_ble_timer != NULL)
+    {
+        xTimerStart(long_press_ble_timer, 0);
+    }
+    else
+    {
+        ESP_LOGE(LOCK_CONTROL_TAG, "Failed to create long press timer");
+    }
+
+    ws2812b_switch_effect(LED_EFFECT_BLE_TRY_PAIRING); // 播放蓝牙配对灯效
+}
+
+void stop_ble_long_press_timer()
+{
+    if (long_press_ble_timer != NULL)
+    {
+        xTimerStop(long_press_ble_timer, 0);
+        xTimerDelete(long_press_ble_timer, 0);
+        long_press_ble_timer = NULL;
+    }
 }
