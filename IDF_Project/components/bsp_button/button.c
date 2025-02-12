@@ -1,5 +1,4 @@
 #include "button.h"
-#include "ble_module.h"
 #include "ws2812b_led.h"
 #include "_freedorm_main.h"
 #include "lock_control.h"
@@ -165,26 +164,10 @@ void BTN1_PRESS_UP_Handler(void *btn)
     if (flag_long_press_start) // 长按之后的抬起就是长按结束
     {
         ESP_LOGI(BUTTON_TAG, "Long press end detected");
-        stop_long_press_timer();     // 停止长按计时器，结束计时
-        stop_ble_long_press_timer(); // 停止进入蓝牙配对模式，结束计时
-
-        if (flag_ble_start_pairing == false && (get_current_lock_state() == STATE_NORAML_DEFAULT)) // 防止在其他状态下长按进入蓝牙配对模式
-        {
-            ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE); // 原本是用来打断蓝牙配对动画的，但是和上电动画冲突，所以这里用一个标志位来判断
-        }
+        send_button_event(BUTTON_EVENT_LONG_PRESS_END); // 发送长按结束事件给状态机，让状态机处理
+        stop_long_press_timer();                        // 停止长按计时器，结束计时
         flag_long_press_start = false;
     }
-}
-
-void ble_start_pairing(void)
-{
-    xTimerStop(long_press_ble_timer, 0);
-    xTimerDelete(long_press_ble_timer, 0);
-
-    flag_long_press_start = false; // 清除长按标志，防止放手之后去到默认灯效
-
-    xSemaphoreGive(pairing_semaphore);
-    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
 }
 
 void long_press_timer_callback()
