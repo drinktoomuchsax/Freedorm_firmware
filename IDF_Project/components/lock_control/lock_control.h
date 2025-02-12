@@ -30,7 +30,7 @@ typedef enum
     STATE_LOCK_END,                // 锁门结束阶段，关掉恢复锁门的定时器
     STATE_BLE_TEMP_OPEN,           // 蓝牙靠近开门，显示灯效
     STATE_BLE_TEMP_OPEN_END,       // 蓝牙靠近开门结束，显示结束灯效，
-    STATE_BLE_PAIRING_PREPARE,     // 蓝牙配对准备状态，长按进入此状态，继续长按进入配对状态
+    STATE_BLE_PAIRING_PREPARE,     // 蓝牙配对准备状态，长按进入此状态，继续长按6秒进入蓝牙配对状态（公共广播）
     STATE_BLE_PAIRING_IN_PROGRESS, // 蓝牙配对中状态，公共广播，等待连接
     STATE_BLE_PAIRING_TIME_OUT,    // 蓝牙配对超时, 2分钟后自动退出配对状态
 } lock_status_t;

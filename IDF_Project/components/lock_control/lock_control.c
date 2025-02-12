@@ -2,6 +2,8 @@
 #include "button.h"
 #include "ws2812b_led.h"
 #include "freertos/queue.h"
+#include "ble_module.h"
+#include "esp_mac.h"
 
 #define LOCK_CONTROL_TAG "LOCK_CONTROL"
 
@@ -35,7 +37,7 @@ void lock_set_normal();
 
 /**
  * @brief 让门锁进入开门状态，通过拉低LOCK线，使宿舍门锁模块进入开门状态
- * @attention 注意！因为不能确定是单次开门调用的还是常开模式调用的，所以这里不改变状态，在调用的地方改变
+ * @attention 注意！因为不能确定是单次开门调用的还是常开模式调用的，所以这里不改变状态，在调用的地方通过参数open_mode来判断要去的状态
  *
  */
 void lock_set_open(open_mode_t open_mode);
@@ -46,10 +48,11 @@ void lock_set_open(open_mode_t open_mode);
  *
  */
 void lock_set_lock();
+
 void start_timer_temp_open();
 
 /**
- * @brief 开始蓝牙长按计时器，6s之后进入蓝牙配对模式
+ * @brief 开始蓝牙长按计时器，6s之后进入蓝牙配对模式，同时蓝牙进入配对灯效在这里开始播放
  *
  */
 void start_ble_long_press_timer();
@@ -60,7 +63,27 @@ void start_ble_long_press_timer();
  */
 void stop_ble_long_press_timer();
 
+/**
+ * @brief 发送一个蓝牙配对信号量，让ble_module进入配对模式
+ *
+ */
+void ble_start_pairing(void);
+
 /* 工具函数声明和定义 */
+// {
+//     STATE_POWER_ON_BLACK = 0,
+//     STATE_NORAML_DEFAULT,          // 门正常状态，未锁定，未打开，使用校园卡开门
+//     STATE_TEMP_OPEN,               // 门展示打开状态，直接推开门，持续“TIME_RECOVER_TEMP_OPEN”秒
+//     STATE_ALWAYS_OPEN,             // 门打开状态，直接推开门
+//     STATE_LOCKED,                  // 门锁定状态，任何卡都刷不开
+//     STATE_TEMP_OPEN_END,           // 按键单次开门结束
+//     STATE_LOCK_END,                // 锁门结束阶段，关掉恢复锁门的定时器
+//     STATE_BLE_TEMP_OPEN,           // 蓝牙靠近开门，显示灯效
+//     STATE_BLE_TEMP_OPEN_END,       // 蓝牙靠近开门结束，显示结束灯效，
+//     STATE_BLE_PAIRING_PREPARE,     // 蓝牙配对准备状态，长按进入此状态，继续长按6秒进入蓝牙配对状态（公共广播）
+//     STATE_BLE_PAIRING_IN_PROGRESS, // 蓝牙配对中状态，公共广播，等待连接
+//     STATE_BLE_PAIRING_TIME_OUT,    // 蓝牙配对超时, 2分钟后自动退出配对状态
+// } lock_status_t;
 static const char *get_lock_state_name(lock_status_t state)
 {
     switch (state)
@@ -79,6 +102,16 @@ static const char *get_lock_state_name(lock_status_t state)
         return "STATE_TEMP_OPEN_END";
     case STATE_LOCK_END:
         return "STATE_LOCK_END";
+    case STATE_BLE_TEMP_OPEN:
+        return "STATE_BLE_TEMP_OPEN";
+    case STATE_BLE_TEMP_OPEN_END:
+        return "STATE_BLE_TEMP_OPEN_END";
+    case STATE_BLE_PAIRING_PREPARE:
+        return "STATE_BLE_PAIRING_PREPARE";
+    case STATE_BLE_PAIRING_IN_PROGRESS:
+        return "STATE_BLE_PAIRING_IN_PROGRESS";
+    case STATE_BLE_PAIRING_TIME_OUT:
+        return "STATE_BLE_PAIRING_TIME_OUT";
     default:
         return "Unknown Lock State";
     }
@@ -209,6 +242,7 @@ void lock_control_task(void *pvParameters)
                 else if (event == BUTTON_EVENT_LONG_PRESS_START)
                 {
                     start_ble_long_press_timer();
+                    transition_to_state(STATE_BLE_PAIRING_PREPARE);
                 }
 
                 break;
@@ -263,11 +297,20 @@ void lock_control_task(void *pvParameters)
                 break;
 
             case STATE_BLE_PAIRING_PREPARE:
-                // if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S)
-                // {
-                //     transition_to_state(STATE_BLE_PAIRING_IN_PROGRESS);
-                //     ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
-                // }
+                ESP_LOGI(LOCK_CONTROL_TAG, "debug: getting into STATE_BLE_PAIRING_PREPARE");
+                if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S) // 灯效播放完了（6s），正好能够进入配对模式
+                {
+                    transition_to_state(STATE_BLE_PAIRING_IN_PROGRESS);
+                    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
+                }
+                else if (event == BUTTON_EVENT_LONG_PRESS_END)
+                {
+                    ESP_LOGI(LOCK_CONTROL_TAG, "Long press end detected, stop pairing");
+                    stop_ble_long_press_timer();
+                    transition_to_state(STATE_NORAML_DEFAULT);
+                    ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+                }
+
                 break;
 
             case STATE_BLE_PAIRING_IN_PROGRESS:
@@ -406,4 +449,13 @@ void stop_ble_long_press_timer()
         xTimerDelete(long_press_ble_timer, 0);
         long_press_ble_timer = NULL;
     }
+}
+
+void ble_start_pairing(void)
+{
+    xTimerStop(long_press_ble_timer, 0);
+    xTimerDelete(long_press_ble_timer, 0);
+
+    xSemaphoreGive(pairing_semaphore);
+    ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
 }
