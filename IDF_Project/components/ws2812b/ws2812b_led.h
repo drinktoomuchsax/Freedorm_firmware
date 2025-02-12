@@ -14,7 +14,7 @@ typedef enum
     LED_EFFECT_OPEN_MODE_END,             // 开门结束闪烁
     LED_EFFECT_CONFIRM_FACTORY_RESET,     // 确定恢复出厂设置
     LED_EFFECT_FACTORY_RESETTING,         // 恢复出厂设置中（发包给后端通知微信解绑，清蓝牙，清CAS
-    LED_EFFECT_DEVICE_INITIALIZED,        // 设备初始化完毕
+    LED_EFFECT_FINISH_FACTORY_RESET,      // 设备初始化完毕
     LED_EFFECT_BLE_TRY_PAIRING,           // ble_尝试进入蓝牙配对
     LED_EFFECT_BLE_PAIRING_MODE,          // ble_进入蓝牙配对状态
     LED_EFFECT_BLE_CONNECTED_FIRST_TIME,  // ble_蓝牙连接（初次连接建立成功
