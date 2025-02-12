@@ -49,6 +49,10 @@ void lock_set_open(open_mode_t open_mode);
  */
 void lock_set_lock();
 
+/**
+ * @brief 进入临时开门状态后启用的定时器，TIME_RECOVER_TEMP_OPEN秒后恢复到正常状态
+ *
+ */
 void start_timer_temp_open();
 
 /**
@@ -69,21 +73,14 @@ void stop_ble_long_press_timer();
  */
 void ble_start_pairing(void);
 
+/**
+ * @brief 恢复出厂设置，忘记蓝牙、WI-FI
+ *
+ * TODO: 具体的恢复出厂设置操作，蓝牙和WI-FI的操作
+ */
+void factory_reset_start(void);
+
 /* 工具函数声明和定义 */
-// {
-//     STATE_POWER_ON_BLACK = 0,
-//     STATE_NORAML_DEFAULT,          // 门正常状态，未锁定，未打开，使用校园卡开门
-//     STATE_TEMP_OPEN,               // 门展示打开状态，直接推开门，持续“TIME_RECOVER_TEMP_OPEN”秒
-//     STATE_ALWAYS_OPEN,             // 门打开状态，直接推开门
-//     STATE_LOCKED,                  // 门锁定状态，任何卡都刷不开
-//     STATE_TEMP_OPEN_END,           // 按键单次开门结束
-//     STATE_LOCK_END,                // 锁门结束阶段，关掉恢复锁门的定时器
-//     STATE_BLE_TEMP_OPEN,           // 蓝牙靠近开门，显示灯效
-//     STATE_BLE_TEMP_OPEN_END,       // 蓝牙靠近开门结束，显示结束灯效，
-//     STATE_BLE_PAIRING_PREPARE,     // 蓝牙配对准备状态，长按进入此状态，继续长按6秒进入蓝牙配对状态（公共广播）
-//     STATE_BLE_PAIRING_IN_PROGRESS, // 蓝牙配对中状态，公共广播，等待连接
-//     STATE_BLE_PAIRING_TIME_OUT,    // 蓝牙配对超时, 2分钟后自动退出配对状态
-// } lock_status_t;
 static const char *get_lock_state_name(lock_status_t state)
 {
     switch (state)
@@ -112,6 +109,11 @@ static const char *get_lock_state_name(lock_status_t state)
         return "STATE_BLE_PAIRING_IN_PROGRESS";
     case STATE_BLE_PAIRING_TIME_OUT:
         return "STATE_BLE_PAIRING_TIME_OUT";
+    case STATE_RESTORY_FACTORY_SETTINGS_PREPARE:
+        return "STATE_RESTORY_FACTORY_SETTINGS_PREPARE";
+    case STATE_RESTORY_FACTORY_SETTINGS:
+        return "STATE_RESTORY_FACTORY_SETTINGS";
+
     default:
         return "Unknown Lock State";
     }
@@ -276,6 +278,14 @@ void lock_control_task(void *pvParameters)
                     reset_timer(&lock_timer); // 关闭锁定设置的定时器
                     lock_set_normal();
                 }
+                else if (event == BUTTON_EVENT_LONG_PRESS_START) // 长按进入恢复出厂设置状态
+                {
+
+                    reset_timer(&lock_timer); // 关闭锁定设置的定时器
+                    lock_set_normal();
+                    ws2812b_switch_effect(LED_EFFECT_CONFIRM_FACTORY_RESET);
+                    transition_to_state(STATE_RESTORY_FACTORY_SETTINGS_PREPARE);
+                }
                 break;
 
             case STATE_BLE_TEMP_OPEN:
@@ -297,7 +307,6 @@ void lock_control_task(void *pvParameters)
                 break;
 
             case STATE_BLE_PAIRING_PREPARE:
-                ESP_LOGI(LOCK_CONTROL_TAG, "debug: getting into STATE_BLE_PAIRING_PREPARE");
                 if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S) // 灯效播放完了（6s），正好能够进入配对模式
                 {
                     transition_to_state(STATE_BLE_PAIRING_IN_PROGRESS);
@@ -327,6 +336,28 @@ void lock_control_task(void *pvParameters)
                 //     ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
                 // }
                 break;
+            case STATE_RESTORY_FACTORY_SETTINGS_PREPARE:
+                if (event == BUTTON_EVENT_LONG_PRESS_HOLD_6S)
+                {
+                    transition_to_state(STATE_RESTORY_FACTORY_SETTINGS);
+                    ws2812b_switch_effect(LED_EFFECT_FACTORY_RESETTING);
+                    vTaskDelay(pdMS_TO_TICKS(4000));
+                }
+                else if (event == BUTTON_EVENT_LONG_PRESS_END)
+                {
+                    // stop_factory_reset_long_press_timer();
+                    transition_to_state(STATE_NORAML_DEFAULT);
+                    ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+                }
+                break;
+            case STATE_RESTORY_FACTORY_SETTINGS:
+                ESP_LOGI(LOCK_CONTROL_TAG, "Factory reset start");
+                ws2812b_switch_effect(LED_EFFECT_FINISH_FACTORY_RESET);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                factory_reset_start(); // 这个地方直接重启，不用再切换状态了
+
+                break;
+
             default:
                 break;
             }
@@ -458,4 +489,32 @@ void ble_start_pairing(void)
 
     xSemaphoreGive(pairing_semaphore);
     ws2812b_switch_effect(LED_EFFECT_BLE_PAIRING_MODE);
+}
+
+void factory_reset_start(void)
+{
+
+    // esp_err_t err = esp_wifi_restore();
+    // if (err == ESP_OK)
+    // {
+    //     ESP_LOGI(LOCK_CONTROL_TAG, "Wi-Fi restored to factory settings");
+    // }
+    // else
+    // {
+    //     ESP_LOGE(LOCK_CONTROL_TAG, "Failed to restore Wi-Fi to factory settings");
+    // }
+
+    // // 恢复蓝牙
+    // err = esp_ble_gap_remove_bond_device_all();
+    // if (err == ESP_OK)
+    // {
+    //     ESP_LOGI(LOCK_CONTROL_TAG, "Bluetooth restored to factory settings");
+    // }
+    // else
+    // {
+    //     ESP_LOGE(LOCK_CONTROL_TAG, "Failed to restore Bluetooth to factory settings");
+    // }
+
+    // 重启设备
+    esp_restart();
 }
