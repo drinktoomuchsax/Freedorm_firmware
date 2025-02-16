@@ -1,2 +1,4 @@
-/.vscode
-/temp
+*/.vscode
+*/temp
+*/build
+*/.devcontainer
