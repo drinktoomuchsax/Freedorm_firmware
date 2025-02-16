@@ -23,6 +23,7 @@
 #include "ble_module.h"
 #include "ws2812b_led.h"
 #include "lock_control.h"
+#include "freedorm_mqtt.h"
 
 /**
  * Brief:
@@ -65,4 +66,14 @@ void app_main(void)
     freedorm_button_init();
     lock_control_init(); // 为了主函数不是太拥挤，大部分状态机都放到了lock_control.c中
     xTaskCreate(&button_task, "button_task", 2048, NULL, 1, NULL);
+
+    // esp_err_t err = mqtt_start();
+    // if (err != ESP_OK)
+    // {
+    //     ESP_LOGE("APP", "Failed to start MQTT: %s", esp_err_to_name(err));
+    // }
+    // else
+    // {
+    //     ESP_LOGI("APP", "MQTT started successfully");
+    // }
 }
