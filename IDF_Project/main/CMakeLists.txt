@@ -4,6 +4,7 @@ idf_component_register(SRCS     "_freedorm_main.c"
                                 bsp_ble 
                                 ws2812b 
                                 lock_control
+                                freedorm_mqtt
                     PRIV_REQUIRES   freertos
                                     esp_system
                                     esp_wifi

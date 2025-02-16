@@ -43,21 +43,23 @@ static uint32_t notify_count = 0;
 
 static ws2812b_queue_data_t received_effect_queue_data = {
     // 定义全局参数变量并初始化
-    .effect_args = {
-        .color_rgb = WHITE_RGB, // 默认Freedorm蓝色
-        .direction = LED_DIRECTION_TOP_DOWN,
-        .loop_mode = LED_MODE_LOOP,
-    },
+    .effect_args =
+        {
+            .color_rgb = WHITE_RGB, // 默认Freedorm蓝色
+            .direction = LED_DIRECTION_TOP_DOWN,
+            .loop_mode = LED_MODE_LOOP,
+        },
     .current_effect = DEFAULT_EFFECT,
 };
 
 static ws2812b_state_effect_t current_effect_btn = DEFAULT_EFFECT;
 static ws2812b_queue_data_t effect_data = {
-    .effect_args = {
-        .color_rgb = {255, 0, 0}, // 红色
-        .direction = LED_DIRECTION_TOP_DOWN,
-        .loop_mode = LED_MODE_LOOP,
-    },
+    .effect_args =
+        {
+            .color_rgb = {255, 0, 0}, // 红色
+            .direction = LED_DIRECTION_TOP_DOWN,
+            .loop_mode = LED_MODE_LOOP,
+        },
     .current_effect = DEFAULT_EFFECT,
 };
 
@@ -90,7 +92,7 @@ void ws2812b_set_color(int index, uint8_t r, uint8_t g, uint8_t b);
  * @brief 选择一个颜色，设置所有 LED 为这个颜色
  *
  * @param rgb_color
- * @param time_ms 持续时间，单位 ms，在持续时间内可以切换效果
+ * @param time_ms 持续时间，单位 ms，在持续时间内可以切换效果，0 表示立刻设置，之后也会一直保持这个颜色
  */
 static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color, uint16_t time_ms);
 
@@ -200,8 +202,7 @@ static void ws2812b_shutdown(void);
  * Wiki: https://en.wikipedia.org/wiki/HSL_and_HSV
  *
  */
-static void
-led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b)
+static void led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b)
 {
     h %= 360; // h -> [0,360]
     uint32_t rgb_max = v * 2.55f;
@@ -284,8 +285,8 @@ static const char *get_effect_name(ws2812b_state_effect_t effect)
         return ENUM_TO_STRING(LED_EFFECT_CONFIRM_FACTORY_RESET);
     case LED_EFFECT_FACTORY_RESETTING:
         return ENUM_TO_STRING(LED_EFFECT_FACTORY_RESETTING);
-    case LED_EFFECT_DEVICE_INITIALIZED:
-        return ENUM_TO_STRING(LED_EFFECT_DEVICE_INITIALIZED);
+    case LED_EFFECT_FINISH_FACTORY_RESET:
+        return ENUM_TO_STRING(LED_EFFECT_FINISH_FACTORY_RESET);
     case LED_EFFECT_BLE_TRY_PAIRING:
         return ENUM_TO_STRING(LED_EFFECT_BLE_TRY_PAIRING);
     case LED_EFFECT_BLE_PAIRING_MODE:
@@ -465,14 +466,15 @@ static void ws2812b_effect_task(void *arg)
             break;
 
         case LED_EFFECT_CONFIRM_FACTORY_RESET:
-            ws2812b_led_meteor((ws2812b_color_rgb_t)GREEN_RGB, 500, LED_DIRECTION_TOP_DOWN, true);
+            ws2812b_led_meteor((ws2812b_color_rgb_t)RED_RGB, 500, LED_DIRECTION_TOP_DOWN, true);
             break;
 
         case LED_EFFECT_FACTORY_RESETTING:
-            ws2812b_led_breathing_all((ws2812b_color_rgb_t)RED_RGB, 500, false);
+            // 红灯呼吸，直到完成恢复出厂设置后进入下一个状态
+            ws2812b_led_breathing_all((ws2812b_color_rgb_t)RED_RGB, 1000, true);
             break;
 
-        case LED_EFFECT_DEVICE_INITIALIZED:
+        case LED_EFFECT_FINISH_FACTORY_RESET:
             ws2812b_led_blink((ws2812b_color_rgb_t)RED_RGB, 200, 50, 3);
             break;
 
@@ -490,6 +492,7 @@ static void ws2812b_effect_task(void *arg)
 
         case LED_EFFECT_OPEN_BLUETOOTH_NEARBY:
             ws2812b_led_waterfall((ws2812b_color_rgb_t)BLUE_RGB, 1000);
+            ws2812b_led_set_color_all((ws2812b_color_rgb_t)BLUE_RGB, TIME_BLE_RECOVER_TEMP_OPEN);
             break;
 
         case LED_EFFECT_OPEN_BLUETOOTH_FINISHED:
@@ -711,9 +714,7 @@ static void ws2812b_led_breathing_wave(ws2812b_color_rgb_t color_rgb, ws2812b_di
     // 如果是来回模式，反转方向
     if (loop_mode == LED_LOOP_MODE_PINGPONG)
     {
-        ws2812b_led_breathing_wave(color_rgb,
-                                   (direction == LED_DIRECTION_TOP_DOWN) ? LED_DIRECTION_TOP_DOWN : LED_DIRECTION_TOP_DOWN,
-                                   LED_LOOP_MODE_SINGLE);
+        ws2812b_led_breathing_wave(color_rgb, (direction == LED_DIRECTION_TOP_DOWN) ? LED_DIRECTION_TOP_DOWN : LED_DIRECTION_TOP_DOWN, LED_LOOP_MODE_SINGLE);
     }
 }
 
@@ -811,8 +812,7 @@ static void ws2812b_led_rainbow_breathing_all(uint16_t loop_time_ms)
                               (brightness_max - (step - transition_steps / 2) * (brightness_max - brightness_min) / (transition_steps / 2));      // 后半段亮度减少
 
         // 将 HSV 转换为 RGB
-        led_strip_hsv2rgb(hsv_color.hue, hsv_color.saturation, hsv_color.value,
-                          &rgb_color.red, &rgb_color.green, &rgb_color.blue);
+        led_strip_hsv2rgb(hsv_color.hue, hsv_color.saturation, hsv_color.value, &rgb_color.red, &rgb_color.green, &rgb_color.blue);
 
         // 设置整排灯带为相同颜色
         for (int i = 0; i < WS2812B_LED_NUMBERS; i++)
