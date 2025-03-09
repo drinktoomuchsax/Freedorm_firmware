@@ -1,0 +1,31 @@
+---
+config:
+  theme: neo
+  look: neo
+  layout: elk
+---
+stateDiagram
+  direction TB
+  [*] --> STATE_POWER_ON_BLACK
+  STATE_POWER_ON_BLACK --> STATE_NORAML_DEFAULT:👆长按按键5s / 蓝色缓慢亮起
+  STATE_NORAML_DEFAULT --> STATE_TEMP_OPEN:👆单击开关 / lock_set_normal(), start_timer(TIME_RECOVER_STATE_TEMP_OPEN), LED_EFFECT_SINGLE_OPEN_DOOR
+  STATE_NORAML_DEFAULT --> STATE_ALWAYS_OPEN:🤟🏽🤟🏽双击开关 / lock_set_open(), set_light_effect("breathing")
+  STATE_NORAML_DEFAULT --> STATE_LOCKED:👆👆👆👆10次 / set_light_effect("amusement")
+  STATE_TEMP_OPEN --> STATE_TEMP_OPEN_END:👆单击开关 [门恢复默认] / lock_set_normal(), LED_EFFECT_OPEN_MODE_END
+  STATE_TEMP_OPEN --> STATE_ALWAYS_OPEN:🤟🏽🤟🏽双击开关 / set_light_effect("breathing")
+  STATE_TEMP_OPEN --> STATE_TEMP_OPEN_END:定时器超时
+  STATE_TEMP_OPEN_END --> STATE_NORAML_DEFAULT:TIME_RECOVER_STATE_TEMP_OPEN秒超时 [门未关闭] / trigger_alarm(), reset_timer(), set_light_effect("blink_3_times")
+  STATE_ALWAYS_OPEN --> STATE_TEMP_OPEN_END:👆单击开关 / lock_set_normal(), set_light_effect("default")
+  STATE_LOCKED --> STATE_LOCK_END:10分钟自动恢复
+  STATE_LOCKED --> STATE_NORAML_DEFAULT:👆单击开关 / lock_set_normal(), set_light_effect("default")
+  STATE_LOCK_END --> STATE_NORAML_DEFAULT:定时器结束 / set_light_effect("default")
+  STATE_NORAML_DEFAULT --> BLE_PAIRING_PREPARE:用户长按按键 2 秒 (long_press_start)
+  BLE_PAIRING_PREPARE --> BLE_PAIRING_PREPARE:每秒积累蓝色流星效果 (long_press_hold)
+  BLE_PAIRING_PREPARE --> BLE_PAIRING_IN_PROGRESS:流星效果完成后 6 秒，进入蓝牙配对模式
+  BLE_PAIRING_IN_PROGRESS --> STATE_NORAML_DEFAULT:有设备连接上，配对完成
+  BLE_PAIRING_IN_PROGRESS --> STATE_TEMP_OPEN:👆单击开关
+  BLE_PAIRING_IN_PROGRESS --> BLE_PAIRING_TIME_OUT:蓝牙配对超时
+  STATE_NORAML_DEFAULT --> STATE_BLE_TEMP_OPEN:🟦🦷蓝牙靠近
+  STATE_BLE_TEMP_OPEN --> STATE_BLE_TEMP_OPEN_END:ble_temp_open_timer时间到了 / 👆单击开关
+  STATE_BLE_TEMP_OPEN_END --> STATE_NORAML_DEFAULT:蓝色闪三下，然后lock_set_normal()
+  BLE_PAIRING_IN_PROGRESS:蓝牙配对中，公共广播参数，等待连接
