@@ -320,7 +320,7 @@ void loop_ws2812b_effect()
 
 void ws2812b_switch_effect(ws2812b_state_effect_t effect)
 {
-    ESP_LOGI(TAG, "Sent! Switch to effect: %s", get_effect_name(effect));
+    ESP_LOGI(TAG, "Sent! %s to effect: %s",get_effect_name(ws2812b_current_effect), get_effect_name(effect));
 
     ws2812b_current_effect = effect;
     is_switch_effect = true;
@@ -374,7 +374,7 @@ static bool check_effect_switch(void)
 {
     if (is_switch_effect)
     {
-        ESP_LOGI(TAG, "Effect switched during transition!");
+        ESP_LOGI(TAG, "Effect switched to %s during transition!", get_effect_name(ws2812b_current_effect));
         is_switch_effect = false;
         return true; // 指示需要切换
     }
@@ -575,6 +575,8 @@ static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color, uint16_t ti
             return;
         }
     }
+
+    ESP_LOGI(TAG, "Set color all done.");
 }
 
 static void ws2812b_led_rainbow_all(void)
@@ -1034,11 +1036,6 @@ static void ws2812b_led_waterfall(ws2812b_color_rgb_t color_rgb, uint16_t waterf
         // 刷新颜色到灯带
         flash_led_strip();
 
-        if (check_effect_switch())
-        {
-            return;
-        }
-
         // 延迟控制速度
         vTaskDelay(pdMS_TO_TICKS(TRANSITION_DELAY_MS));
 
@@ -1115,4 +1112,10 @@ static void ws2812b_shutdown(void)
     // 关闭 LED 灯带，不发光
     memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
     flash_led_strip();
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    if (check_effect_switch())
+    {
+        return;
+    }
 }

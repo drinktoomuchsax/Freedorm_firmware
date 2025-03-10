@@ -295,6 +295,9 @@ void lock_control_task(void *pvParameters)
                     }else if (default_led_effect == LED_EFFECT_POWER_ON_ANIMATION){
                         default_led_effect = LED_EFFECT_DEFAULT_STATE;
                     }
+
+                    reset_timer(&lock_timer); // 关闭锁定设置的定时器
+                    lock_set_normal();
                 }
                 
                 break;
@@ -473,8 +476,9 @@ void lock_set_normal(void)
     gpio_set_level(OUTPUT_LED_D5, 0);
 
     // 灯效和状态机切换到正常状态
-    ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
-    transition_to_state(STATE_NORAML_DEFAULT);
+    transition_to_STATE_NORAML_DEFAULT();
+    // ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+    // transition_to_state(STATE_NORAML_DEFAULT);
 }
 
 lock_status_t get_current_lock_state()
