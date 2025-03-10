@@ -23,7 +23,7 @@ typedef enum
     LED_EFFECT_OPEN_BLUETOOTH_NEARBY,     // open_蓝牙靠近开门
     LED_EFFECT_OPEN_BLUETOOTH_FINISHED,   // open_蓝牙靠近开门结束
     LED_EFFECT_LOCK_DOOR,                 // open_锁门
-    LED_EFFECT_POWER_ON_ANIMATION,        // 默认上电动画, 现在是黑屏
+    LED_EFFECT_POWER_ON_ANIMATION,        // 默认上电之后的灯效, LED不发光，黑屏
     LED_EFFECT_FIRST_POWER_ON_ACTIVATE,   // 第一次上电激活
     /*!没有效果，一定要放在最后，用来判断效果数量!*/
     LED_EFFECT_COUNT,

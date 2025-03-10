@@ -17,7 +17,7 @@ typedef enum
 {
     BUTTON_EVENT_SINGLE_CLICK,            // 单击
     BUTTON_EVENT_DOUBLE_CLICK,            // 双击
-    BUTTON_EVENT_MULTI_CLICK,             // 大于三次点击
+    BUTTON_EVENT_DECUPLE_CLICK,             // 10次点击
     BUTTON_EVENT_LONG_PRESS_START,        // 长按开始
     BUTTON_EVENT_LONG_PRESS_HOLD_3S,      // 这里是hold 3s，加上长按开始的2s，总共按下5s后会触发
     BUTTON_EVENT_LONG_PRESS_HOLD_4S,      // 同上

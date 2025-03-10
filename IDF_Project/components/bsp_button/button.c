@@ -115,7 +115,7 @@ void BTN1_PRESS_REPEAT_Handler(void *btn)
     ESP_LOGI(BUTTON_TAG, "Press repeat detected, repeat count: %d", btn1.repeat);
     if (btn1.repeat == 10)
     {
-        send_button_event(BUTTON_EVENT_MULTI_CLICK); // 10 次点击，发送锁门信号
+        send_button_event(BUTTON_EVENT_DECUPLE_CLICK); // 10 次点击，发送锁门信号
     }
 }
 

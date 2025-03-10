@@ -22,7 +22,7 @@ static TimerHandle_t long_press_ble_timer = NULL; // 蓝牙长按计时器，用
 
 // 状态切换函数声明
 void transition_to_state(lock_status_t new_state);
-
+void transition_to_STATE_NORAML_DEFAULT(); // 转换到默认刷卡开门状态，灯效可以被配置，默认是彩虹呼吸灯
 void transition_to_STATE_TEMP_OPEN_END();
 void transition_to_STATE_BLE_TEMP_OPEN_END();
 
@@ -118,6 +118,8 @@ static const char *get_lock_state_name(lock_status_t state)
         return "Unknown Lock State";
     }
 }
+
+static ws2812b_state_effect_t default_led_effect = LED_EFFECT_DEFAULT_STATE;
 
 void start_timer_temp_open()
 {
@@ -233,7 +235,7 @@ void lock_control_task(void *pvParameters)
                 {
                     lock_set_open(OPEN_MODE_ALWAYS); // 双击进入常开模式
                 }
-                else if (event == BUTTON_EVENT_MULTI_CLICK)
+                else if (event == BUTTON_EVENT_DECUPLE_CLICK)
                 {
                     lock_set_lock();
                 }
@@ -272,7 +274,7 @@ void lock_control_task(void *pvParameters)
                 }
                 break;
 
-            case STATE_LOCKED:
+            case STATE_LOCKED: // 发布产品里面没有焊接硬件电阻，所以这个状态不会有锁门的现象
                 if (event == BUTTON_EVENT_SINGLE_CLICK || event == BUTTON_EVENT_DOUBLE_CLICK) // 单击或双击都可以关闭锁定模式🔒
                 {
                     reset_timer(&lock_timer); // 关闭锁定设置的定时器
@@ -285,7 +287,16 @@ void lock_control_task(void *pvParameters)
                     lock_set_normal();
                     ws2812b_switch_effect(LED_EFFECT_CONFIRM_FACTORY_RESET);
                     transition_to_state(STATE_RESTORY_FACTORY_SETTINGS_PREPARE);
+                }else if (event == BUTTON_EVENT_DECUPLE_CLICK)
+                {
+                    if(default_led_effect == LED_EFFECT_DEFAULT_STATE){
+                        default_led_effect = LED_EFFECT_POWER_ON_ANIMATION;
+
+                    }else if (default_led_effect == LED_EFFECT_POWER_ON_ANIMATION){
+                        default_led_effect = LED_EFFECT_DEFAULT_STATE;
+                    }
                 }
+                
                 break;
 
             case STATE_BLE_TEMP_OPEN:
@@ -370,6 +381,20 @@ void transition_to_state(lock_status_t new_state)
 {
     ESP_LOGI(LOCK_CONTROL_TAG, "Transitioning from state %s to state %s", get_lock_state_name(current_lock_state), get_lock_state_name(new_state));
     current_lock_state = new_state;
+}
+
+
+void transition_to_STATE_NORAML_DEFAULT(){
+    
+    if (default_led_effect == LED_EFFECT_DEFAULT_STATE){ // 默认是彩虹呼吸灯，配置黑灯后按10下再按10下开回来
+        transition_to_state(STATE_NORAML_DEFAULT);
+        ws2812b_switch_effect(LED_EFFECT_DEFAULT_STATE);
+    }else if (default_led_effect == LED_EFFECT_POWER_ON_ANIMATION)  // 按10下后，再按10下，关闭默认彩虹呼吸灯
+    {
+        transition_to_state(STATE_NORAML_DEFAULT);
+        ws2812b_switch_effect(LED_EFFECT_POWER_ON_ANIMATION);
+    }
+    
 }
 
 void transition_to_STATE_TEMP_OPEN_END()
