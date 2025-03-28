@@ -3,6 +3,7 @@ idf_component_register(
                                 "esp_hidd_prf_api.c"
                                 "hid_dev.c"
                                 "hid_device_le_prf.c"
+                                "kalman_filter.c"
                         INCLUDE_DIRS "."
                         REQUIRES bt
                         PRIV_REQUIRES   bsp_button 
