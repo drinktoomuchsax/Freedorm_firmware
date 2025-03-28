@@ -17,7 +17,10 @@ class RSSIMonitor(QtWidgets.QMainWindow):
         self.smoothed_rssi_values = []  # Kalman-filtered RSSI values
         self.timestamps = []  # To store timestamps for each RSSI value
         self.rssi_slope = []  # To store RSSI slope values
+        self.slope_timestamps = []  # Timestamps for slope values
         self.rssi_trend = []  # To store RSSI trend values
+        self.trend_timestamps = []  # Timestamps for trend values
+        self.distance_values = []  # To store distance values
         self.device_id = 0  # Default device ID
         self.init_ui()
 
@@ -75,7 +78,7 @@ class RSSIMonitor(QtWidgets.QMainWindow):
         controls_layout.addWidget(self.chk_raw_rssi)
         
         self.chk_kalman_rssi = QtWidgets.QCheckBox("Show Kalman Filtered RSSI")
-        self.chk_kalman_rssi.setChecked(True)
+        self.chk_kalman_rssi.setChecked(False)
         controls_layout.addWidget(self.chk_kalman_rssi)
         
         self.chk_moving_avg = QtWidgets.QCheckBox("Show Moving Average")
@@ -93,6 +96,11 @@ class RSSIMonitor(QtWidgets.QMainWindow):
         self.chk_quality = QtWidgets.QCheckBox("Show Signal Quality")
         self.chk_quality.setChecked(False)
         controls_layout.addWidget(self.chk_quality)
+        
+        # Add checkbox for distance display
+        self.chk_distance = QtWidgets.QCheckBox("Show Distance")
+        self.chk_distance.setChecked(True)
+        controls_layout.addWidget(self.chk_distance)
 
         # Plot area
         self.figure = Figure()
@@ -126,11 +134,16 @@ class RSSIMonitor(QtWidgets.QMainWindow):
             self.running = True
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
+            
+            # Reset all data arrays
             self.rssi_values = []
             self.smoothed_rssi_values = []
             self.timestamps = []
             self.rssi_slope = []
+            self.slope_timestamps = []  # Reset slope timestamps
             self.rssi_trend = []
+            self.trend_timestamps = []  # Reset trend timestamps
+            self.distance_values = []
 
             # Start thread for reading RSSI data
             self.thread = threading.Thread(target=self.read_rssi)
@@ -156,18 +169,21 @@ class RSSIMonitor(QtWidgets.QMainWindow):
         self.timer.stop()
 
     def read_rssi(self):
-        """Read RSSI data, slope, and trend from serial"""
+        """Read RSSI data, slope, trend, and distance from serial"""
         
         # Updated regular expressions
         raw_rssi_pattern = re.compile(r"RSSI of the remote device (\d+): (-?\d+)")  # Match device ID and raw RSSI
         trend_pattern = re.compile(r"RSSI trend: (-?\d+)")  # Match trend value
         smoothed_pattern = re.compile(r"smoothed RSSI of the remote device (\d+): (-?\d+)")  # Match smoothed RSSI
+        distance_pattern = re.compile(r"distance of the remote device (\d+): ([\d.]+)")  # Match device ID and distance
 
         # Variables to store temporarily before adding to arrays
         current_device_id = None
         current_raw_rssi = None
         current_smoothed_rssi = None
         current_trend = None
+        current_distance = None
+        current_timestamp = None
         
         while self.running:
             try:
@@ -175,6 +191,9 @@ class RSSIMonitor(QtWidgets.QMainWindow):
                     # Read and decode serial data
                     line = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
                     print(f"Line: {line}")  # Debug output
+                    
+                    # Generate timestamp for this line
+                    current_timestamp = time.time()
 
                     # Match raw RSSI
                     raw_rssi_match = raw_rssi_pattern.search(line)
@@ -202,16 +221,34 @@ class RSSIMonitor(QtWidgets.QMainWindow):
                             current_smoothed_rssi = smoothed_value
                             print(f"Parsed smoothed RSSI: Device {device_id}, Value {smoothed_value}")
                     
+                    # Match distance
+                    distance_match = distance_pattern.search(line)
+                    if distance_match:
+                        device_id = int(distance_match.group(1))
+                        distance_value = float(distance_match.group(2))
+                        # Only update if same device or no device set yet
+                        if current_device_id is None or current_device_id == device_id:
+                            current_device_id = device_id
+                            current_distance = distance_value
+                            print(f"Parsed distance: Device {device_id}, Value {distance_value}")
+                    
                     # If we have both values, add them as a pair
                     if current_raw_rssi is not None and current_smoothed_rssi is not None:
                         # Add to data arrays
                         self.device_id = current_device_id
                         self.rssi_values.append(current_raw_rssi)
                         self.smoothed_rssi_values.append(current_smoothed_rssi)
-                        self.timestamps.append(time.time())
+                        self.timestamps.append(current_timestamp)
                         
                         if current_trend is not None:
                             self.rssi_trend.append(current_trend)
+                            self.trend_timestamps.append(current_timestamp)  # Store timestamp for trend
+                        
+                        if current_distance is not None:
+                            self.distance_values.append(current_distance)
+                        elif len(self.distance_values) > 0:
+                            # Use previous distance value if available
+                            self.distance_values.append(self.distance_values[-1])
                         
                         # Calculate slope if enough data
                         if len(self.rssi_values) >= 3:
@@ -219,61 +256,81 @@ class RSSIMonitor(QtWidgets.QMainWindow):
                             x = np.array(range(len(recent_values)))
                             slope = np.polyfit(x, recent_values, 1)[0]
                             self.rssi_slope.append(slope)
+                            self.slope_timestamps.append(current_timestamp)  # Store timestamp for slope
                             print(f"Calculated slope: {slope}")
                         
                         # Reset temporary variables
                         current_raw_rssi = None
                         current_smoothed_rssi = None
                         current_trend = None
+                        current_distance = None
                         
                     # If we have data from different logging messages that belong together
-                    elif (current_raw_rssi is not None or current_smoothed_rssi is not None) and \
-                        "I (" in line and "FREEDORM_BLE_GAP" in line:
+                    elif (current_raw_rssi is not None or current_smoothed_rssi is not None or current_distance is not None) and \
+                        "I (" in line and ("FREEDORM_BLE_GAP" in line or "BLE_GAP_TAG" in line):
                         # This appears to be a new logging message, so save what we have
-                        if current_raw_rssi is not None:
+                        if current_raw_rssi is not None or current_smoothed_rssi is not None or current_distance is not None:
                             self.device_id = current_device_id
-                            self.rssi_values.append(current_raw_rssi)
-                            # Use the last known smoothed value or a placeholder
-                            if len(self.smoothed_rssi_values) > 0:
-                                # Repeat the last smoothed value
-                                self.smoothed_rssi_values.append(self.smoothed_rssi_values[-1])
-                            else:
-                                # First data point, just use raw as initial smoothed
-                                self.smoothed_rssi_values.append(current_raw_rssi)
-                            self.timestamps.append(time.time())
                             
-                            if current_trend is not None:
-                                self.rssi_trend.append(current_trend)
-                        
-                        elif current_smoothed_rssi is not None:
-                            self.device_id = current_device_id
-                            # Use the last known raw value or a placeholder
-                            if len(self.rssi_values) > 0:
+                            # Handle raw RSSI
+                            if current_raw_rssi is not None:
+                                self.rssi_values.append(current_raw_rssi)
+                            elif len(self.rssi_values) > 0:
                                 # Repeat the last raw value
                                 self.rssi_values.append(self.rssi_values[-1])
-                            else:
-                                # First data point, just use smoothed as initial raw
-                                self.rssi_values.append(current_smoothed_rssi)
-                            self.smoothed_rssi_values.append(current_smoothed_rssi)
-                            self.timestamps.append(time.time())
+                            
+                            # Handle smoothed RSSI
+                            if current_smoothed_rssi is not None:
+                                self.smoothed_rssi_values.append(current_smoothed_rssi)
+                            elif len(self.smoothed_rssi_values) > 0:
+                                # Repeat the last smoothed value
+                                self.smoothed_rssi_values.append(self.smoothed_rssi_values[-1])
+                            elif current_raw_rssi is not None:
+                                # First data point, just use raw as initial smoothed
+                                self.smoothed_rssi_values.append(current_raw_rssi)
+                            
+                            # Handle distance
+                            if current_distance is not None:
+                                self.distance_values.append(current_distance)
+                            elif len(self.distance_values) > 0:
+                                # Repeat the last distance value
+                                self.distance_values.append(self.distance_values[-1])
+                            
+                            # Add timestamp
+                            self.timestamps.append(current_timestamp)
+                            
+                            # Handle trend with its timestamp
+                            if current_trend is not None:
+                                self.rssi_trend.append(current_trend)
+                                self.trend_timestamps.append(current_timestamp)
+                            
+                            # Calculate slope with its timestamp if enough data
+                            if len(self.rssi_values) >= 3 and len(self.rssi_values) > len(self.rssi_slope):
+                                recent_values = self.rssi_values[-3:]
+                                x = np.array(range(len(recent_values)))
+                                slope = np.polyfit(x, recent_values, 1)[0]
+                                self.rssi_slope.append(slope)
+                                self.slope_timestamps.append(current_timestamp)
                         
                         # Reset temporary variables
                         current_raw_rssi = None
                         current_smoothed_rssi = None
                         current_trend = None
+                        current_distance = None
 
             except Exception as e:
                 print(f"Error reading from serial: {e}")
+                import traceback
+                traceback.print_exc()
                 self.running = False
                 break
 
-
-    def get_elapsed_time(self):
+    def get_elapsed_time(self, timestamps):
         """Convert timestamps to elapsed time in seconds"""
-        if not self.timestamps:
+        if not timestamps:
             return []
-        start_time = self.timestamps[0]
-        return [timestamp - start_time for timestamp in self.timestamps]
+        start_time = self.timestamps[0]  # Always use the first RSSI timestamp as reference
+        return [timestamp - start_time for timestamp in timestamps]
 
     def update_window_size(self, value):
         """Update the moving average window size"""
@@ -286,14 +343,19 @@ class RSSIMonitor(QtWidgets.QMainWindow):
             print("No RSSI data available to plot.")
             return
 
-        self.ax.clear()
+        # Clear the entire figure instead of just the primary axis
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
+        
         self.ax.set_title(f"Real-time RSSI Data - Device {self.device_id}")
         self.ax.set_xlabel("Time (seconds)")
         self.ax.set_ylabel("RSSI (dBm)")
         self.ax.grid()
 
-        # Get elapsed time for the x-axis
-        elapsed_time = self.get_elapsed_time()
+        # Get elapsed time for the x-axis of each data series
+        elapsed_time = self.get_elapsed_time(self.timestamps)
+        slope_elapsed_time = self.get_elapsed_time(self.slope_timestamps)
+        trend_elapsed_time = self.get_elapsed_time(self.trend_timestamps)
 
         # Fix length matching issues for raw RSSI
         min_len = min(len(elapsed_time), len(self.rssi_values))
@@ -314,39 +376,75 @@ class RSSIMonitor(QtWidgets.QMainWindow):
             smoothed_time = plot_time[:smoothed_len]
             plot_smoothed = self.smoothed_rssi_values[:smoothed_len]
             self.ax.plot(smoothed_time, plot_smoothed, label="Kalman Filtered RSSI", 
-                       marker='s', linewidth=1.5, color='purple')
+                    marker='s', linewidth=1.5, color='purple')
 
         # Plot moving average (if checkbox is checked)
         if self.chk_moving_avg.isChecked() and len(self.rssi_values) >= self.window_size:
             smoothed_values = self.calculate_moving_average(plot_rssi, self.window_size)
             smoothed_time = plot_time[self.window_size-1:]
             self.ax.plot(smoothed_time, smoothed_values,
-                       label=f"Moving Average (Window: {self.window_size})", color='red', linewidth=2)
+                    label=f"Moving Average (Window: {self.window_size})", color='red', linewidth=2)
 
-        # Plot RSSI slope (scaled) (if checkbox is checked)
+        # Plot RSSI slope with correct timestamps (if checkbox is checked)
         if self.chk_slope.isChecked() and len(self.rssi_slope) > 0:
-            slope_time = plot_time[-len(self.rssi_slope):]
-            plot_slope = self.rssi_slope[:len(slope_time)]
+            min_slope_len = min(len(slope_elapsed_time), len(self.rssi_slope))
+            plot_slope_time = slope_elapsed_time[:min_slope_len]
+            plot_slope = self.rssi_slope[:min_slope_len]
             scaled_slope = [value * slope_scale_factor for value in plot_slope]
-            self.ax.plot(slope_time, scaled_slope, label=f"RSSI Slope (x{slope_scale_factor})", 
-                       color='orange', linestyle='--', linewidth=1.5)
+            self.ax.plot(plot_slope_time, scaled_slope, label=f"RSSI Slope (x{slope_scale_factor})", 
+                    color='orange', linestyle='--', linewidth=1.5)
 
-        # Plot RSSI trend (scaled) (if checkbox is checked)
+        # Plot RSSI trend with correct timestamps (if checkbox is checked)
         if self.chk_trend.isChecked() and len(self.rssi_trend) > 0:
-            trend_time = plot_time[-len(self.rssi_trend):]
-            plot_trend = self.rssi_trend[:len(trend_time)]
+            min_trend_len = min(len(trend_elapsed_time), len(self.rssi_trend))
+            plot_trend_time = trend_elapsed_time[:min_trend_len]
+            plot_trend = self.rssi_trend[:min_trend_len]
             scaled_trend = [value * trend_scale_factor for value in plot_trend]
-            self.ax.plot(trend_time, scaled_trend, label=f"RSSI Trend (x{trend_scale_factor})", 
-                       color='green', linestyle='-.', linewidth=1.5)
+            self.ax.plot(plot_trend_time, scaled_trend, label=f"RSSI Trend (x{trend_scale_factor})", 
+                    color='green', linestyle='-.', linewidth=1.5)
+                    
+        # Plot distance data (if checkbox is checked and data available)
+        if self.chk_distance.isChecked() and self.distance_values:
+            # Create a twin y-axis for distance
+            ax2 = self.ax.twinx()
+            ax2.set_ylabel('Distance (m)', color='brown')
+            ax2.tick_params(axis='y', labelcolor='brown')
+            
+            distance_len = min(len(plot_time), len(self.distance_values))
+            distance_time = plot_time[:distance_len]
+            plot_distance = self.distance_values[:distance_len]
+            
+            # Use a distinct line style and marker for distance
+            ax2.plot(distance_time, plot_distance, label="Distance", 
+                marker='d', linewidth=2, color='brown', linestyle='-')
+            
+            # Show latest distance value
+            if len(plot_distance) > 0:
+                latest_distance = plot_distance[-1]
+                # Position the text in the upper left corner to avoid overlap with other elements
+                ax2.text(0.02, 0.95, f"Latest Distance: {latest_distance:.2f}m", 
+                    transform=self.ax.transAxes, color='brown',
+                    bbox=dict(facecolor='white', alpha=0.7))
 
         # Add signal quality indicator (if checkbox is checked)
         if self.chk_quality.isChecked() and len(plot_rssi) > 0:
             latest_rssi = plot_rssi[-1]
             quality_text = self.get_signal_quality(latest_rssi)
             self.ax.text(0.02, 0.05, f"Signal Quality: {quality_text}", transform=self.ax.transAxes, 
-                      bbox=dict(facecolor='white', alpha=0.7))
+                    bbox=dict(facecolor='white', alpha=0.7))
 
-        self.ax.legend(loc='upper right')
+        # Add legends for both axes if distance is shown
+        if self.chk_distance.isChecked() and self.distance_values:
+            # Get handles and labels from both axes
+            handles1, labels1 = self.ax.get_legend_handles_labels()
+            handles2, labels2 = ax2.get_legend_handles_labels()
+            
+            # Combine them and create a single legend
+            self.ax.legend(handles1 + handles2, labels1 + labels2, loc='upper right')
+        else:
+            self.ax.legend(loc='upper right')
+            
+        # Draw the canvas with the updated figure
         self.canvas.draw()
 
     def calculate_moving_average(self, data, window_size):
