@@ -32,6 +32,8 @@
 #include "button.h"
 
 #include "ble_module.h"
+#include "kalman_filter.h"
+#include <math.h>
 
 /**
  * BRIEF:
@@ -74,7 +76,7 @@ static uint16_t hid_conn_id = 0;
 
 // 对于APPLE设备，蓝牙设备名称不能带有空 格、下划_线、横杠-、括号()、点·、斜杠/
 // 对于APPLE设备，蓝牙设备名称可以带有
-#define FREEDORM_DEVICE_NAME "FreedormPro1999" 
+#define FREEDORM_DEVICE_NAME "FreedormProSB76" 
 
 // UUID 定义
 #define SERVICE_UUID 0xFF69
@@ -86,6 +88,9 @@ static uint16_t hid_conn_id = 0;
 
 #define TIME_BACK_TO_GAP_WHITELIST 10 * 1000 // 不动或离开后，从GAP白名单里删除，回到广播白名单的时间
 
+#define RSSI_AT_1M -49 // 1米处的RSSI值
+#define RSSI_PATH_LOSS_EXPONENT 4.0 // 路径损耗指数  自由空间: 约2.0，办公室环境: 约3.0，有墙壁阻隔的室内: 约3.5，有严重多径效应的环境: 约4.0-6.0
+#define INDOOR_DISTANCE_THRESHOLD 3.5 // 室内距离阈值，超过这个值则认为是室外
 static freedorm_ble_whitelist_t whitelist = {.num_of_devices = 0};
 static bool pairing_mode = false;
 
@@ -96,6 +101,9 @@ static esp_bd_addr_t last_connected_bda = {0};    // 已连接蓝牙设备地址
 static esp_ble_addr_type_t last_con_bda_type = 0; // 已连接蓝牙设备地址类型，用于存储连接设备的地址
 const int8_t k_rssi_threshold = -65;              // RSSI 阈值，超过这个值则开门
 SemaphoreHandle_t pairing_semaphore = NULL;
+
+static kalman1_state kalman1_state_rssi; // Kalman 滤波器状态
+static kalman2_state kalman2_state_rssi;
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 
@@ -620,122 +628,127 @@ static int8_t find_i_in_rssi_task_list(esp_bd_addr_t remote_bda)
 }
 
 /**
- * @brief 滑动平均算法，计算平滑的RSSI值
- *
- * @param new_rssi 新采集到的RSSI值
- * @return int8_t 平滑后的RSSI值
+ * 将RSSI值转换为估计的物理距离
+ * 
+ * @param rssi           接收到的RSSI值，单位dBm
+ * @param rssi_at_1m     参考距离1米处的RSSI值，单位dBm
+ * @param path_loss_exp  路径损耗指数，自由空间为2.0，室内通常为2.7-3.5
+ * @return               估计的物理距离，单位米
  */
-static int8_t calculate_sliding_average(int8_t new_rssi, esp_bd_addr_t remote_bda)
-{
-
-    int j = find_i_in_rssi_task_list(remote_bda);
-    // 将新值加入滑动窗口
-    rssi_task_list[j].rssi_window[rssi_task_list[j].dude_rssi_index] = new_rssi;
-
-    // 更新滑动窗口索引
-    rssi_task_list[j].dude_rssi_index = (rssi_task_list[j].dude_rssi_index + 1);
-    rssi_task_list[j].dude_rssi_index %= RSSI_AVG_WINDOW_SIZE;
-
-    // 更新已存储的 RSSI 值数量
-    if (rssi_task_list[j].rssi_count < RSSI_AVG_WINDOW_SIZE)
-    {
-        rssi_task_list[j].rssi_count++;
+float rssi_to_distance(int8_t rssi, int8_t rssi_at_1m, float path_loss_exp) {
+    // 检查RSSI值是否合理
+    if (rssi >= rssi_at_1m) {
+        // RSSI值大于等于参考值，说明非常接近或测量有问题
+        return 0.5f; // 返回最小距离
     }
-
-    // 计算滑动平均值
-    int32_t sum = 0;
-    for (uint8_t i = 0; i < rssi_task_list[j].rssi_count; i++)
-    {
-        sum += rssi_task_list[j].rssi_window[i];
+    
+    // 计算距离 d = d₀ × 10^((RSSI₀ - RSSI)/(10 × n))
+    // 其中 d₀ = 1m (参考距离)
+    float distance = powf(10.0f, (rssi_at_1m - rssi) / (10.0f * path_loss_exp));
+    
+    // 限制最大估计距离
+    const float MAX_RELIABLE_DISTANCE = 50.0f;
+    if (distance > MAX_RELIABLE_DISTANCE) {
+        return MAX_RELIABLE_DISTANCE;
     }
-
-    return (int8_t)(sum / rssi_task_list[j].rssi_count);
+    
+    return distance;
 }
 
-const float RSSI_SLOPE_THRESHOLD = 4.69;
-rssi_trend_t evaluate_rssi_trend_regression(int8_t current_rssi, esp_bd_addr_t remote_bda)
-{
-
-    int j = find_i_in_rssi_task_list(remote_bda);
-
-    // 更新 RSSI 历史记录
-    rssi_task_list[j].rssi_history[rssi_task_list[j].rssi_index] = current_rssi;
-    rssi_task_list[j].rssi_index = (rssi_task_list[j].rssi_index + 1) % RSSI_SLOPE_COUNT;
-
-    // ESP_LOGI(BLE_TAG, "RSSI history:");
-    // for (uint8_t i = 0; i < RSSI_SLOPE_COUNT; i++)
-    // {
-    //     ESP_LOGI(BLE_TAG, "RSSI[%d]: %d", i, rssi_task_list[j].rssi_history[i]);
-    // }
-
-    // ESP_LOGI(BLE_TAG, "RSSI index: %d", rssi_task_list[j].rssi_index);
-
-    // 线性回归变量
-    int16_t sum_x = 0;  // 时间索引的和
-    int16_t sum_y = 0;  // RSSI 值的和
-    int16_t sum_x2 = 0; // 时间索引平方的和
-    int16_t sum_xy = 0; // 时间索引与 RSSI 的乘积和
-
-    for (uint8_t i = 0; i < RSSI_SLOPE_COUNT; i++)
-    {
-        int8_t y = rssi_task_list[j].rssi_history[(rssi_task_list[j].rssi_index + i) % RSSI_SLOPE_COUNT];
-        int8_t x = i; // 时间索引
-
-        sum_x += x;
-        sum_y += y;
-        sum_x2 += x * x;
-        sum_xy += x * y;
-    }
-
-    // 计算回归斜率 (slope)
-    int16_t n = RSSI_SLOPE_COUNT;
-    int16_t numerator = n * sum_xy - sum_x * sum_y;
-    int16_t denominator = n * sum_x2 - sum_x * sum_x;
-
-    if (denominator == 0)
-        return RSSI_TREND_STABLE; // 避免除零
-
-    float slope = (float)numerator / denominator;
-
-    slope = slope * 10; // 放大 100 倍，方便观察
-
-    ESP_LOGD(BLE_TAG, "RSSI slope: %.2f", slope);
-
-    // 根据斜率判断趋势
-    if (slope > RSSI_SLOPE_THRESHOLD)
-    {
-        return RSSI_TREND_APPROACHING; // 信号增强，设备靠近
-    }
-    else if (slope < -RSSI_SLOPE_THRESHOLD)
-    {
-        return RSSI_TREND_MOVING_AWAY; // 信号减弱，设备远离
-    }
-    else
-    {
-        return RSSI_TREND_STABLE; // 信号稳定
-    }
-}
 
 /**
- * @brief 打印 RSSI 趋势
- *
- * @param trend RSSI 趋势
+ * @brief 通过滑动窗口计算距离的趋势，还需要排除在室内活动的情况，也就是说，前后两个窗口的值如果都小于一个阈值，那么就认为是在室内活动，不做处理
+ * 
+ * @param distances 
+ * @param size 
+ * @return true 
+ * @return false 
  */
-void print_rssi_trend(rssi_trend_t trend)
-{
-    switch (trend)
-    {
-    case RSSI_TREND_APPROACHING:
-        ESP_LOGI(BLE_TAG, "Device is approaching (RSSI increasing).");
-        break;
-    case RSSI_TREND_MOVING_AWAY:
-        ESP_LOGI(BLE_TAG, "Device is moving away (RSSI decreasing).");
-        break;
-    case RSSI_TREND_STABLE:
-        ESP_LOGI(BLE_TAG, "Device is stable (RSSI unchanged).");
-        break;
+bool is_approaching(float *distances, int size) {
+    if (size <= 1) {
+        ESP_LOGI(BLE_TAG, "Not enough samples to determine trend.");
+        return false;
     }
+    
+    // 比较前半部分和后半部分的平均值
+    float first_half = 0, second_half = 0;
+    int mid = size / 2;
+    
+    for (int i = 0; i < mid; i++) {
+        first_half += distances[i];
+    }
+    
+    for (int i = mid; i < size; i++) {
+        second_half += distances[i];
+    }
+    
+    first_half /= mid;
+    second_half /= (size - mid);
+
+    if (first_half < INDOOR_DISTANCE_THRESHOLD && second_half < INDOOR_DISTANCE_THRESHOLD)
+    {
+        ESP_LOGD(BLE_TAG, "Indoor activity detected. Not calculating trend.");
+        return false;
+    }
+    
+    // 后半部分平均值大于前半部分表示靠近
+    return second_half > first_half;
 }
+
+// 帮我写一个函数用来计算速度，距离存在distance_history里，时间是每个sample 之间的间隔，为RSSI_SAMPLE_COUNT_PER_SEC的倒数，distance_history是一个float数组，长度是RSSI_SAMPLE_COUNT
+// 我想要先拟合一个直线，然后计算直线的斜率，作为速度
+// 速度的单位是米每秒
+/**
+ * 使用线性回归计算速度
+ * @param distance_history 距离历史数据数组
+ * @param RSSI_SAMPLE_COUNT 样本数量
+ * @param RSSI_SAMPLE_COUNT_PER_SEC 每秒采样次数
+ * @return 计算得到的速度（米/秒）
+ */
+float calculate_speed(float* distance_history) {
+    // 时间间隔（秒）
+    float time_interval = 1.0f / RSSI_SAMPLE_COUNT_PER_SEC;
+    
+    // 计算线性回归所需的累加值
+    float sum_x = 0.0f;       // x值（时间）的总和
+    float sum_y = 0.0f;       // y值（距离）的总和
+    float sum_xx = 0.0f;      // x平方的总和
+    float sum_xy = 0.0f;      // x*y的总和
+    
+    // 填充时间数组并计算累加值
+    for (int i = 0; i < RSSI_SAMPLE_COUNT; i++) {
+        float time = i * time_interval;  // 当前样本的时间点
+        float distance = distance_history[i];
+        
+        sum_x += time;
+        sum_y += distance;
+        sum_xx += time * time;
+        sum_xy += time * distance;
+    }
+    
+    // 样本数量（浮点数类型）
+    float n = (float)RSSI_SAMPLE_COUNT;
+    
+    // 计算斜率（速度）：slope = (n*sum_xy - sum_x*sum_y) / (n*sum_xx - sum_x*sum_x)
+    float slope;
+    float denominator = n * sum_xx - sum_x * sum_x;
+    
+    // 防止除以零
+    if (fabsf(denominator) < 1e-6f) {
+        // 如果分母接近于零，意味着所有点几乎在同一垂直线上
+        // 可以返回0表示无法计算，或者根据应用情况处理
+        return 0.0f;
+    }
+    
+    slope = (n * sum_xy - sum_x * sum_y) / denominator;
+    
+    // 斜率即为速度（米/秒）
+    return slope;
+}
+
+
+
+
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
 {
@@ -781,20 +794,6 @@ static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *
     return;
 }
 
-static void unlock_if_rssi_valid(int8_t rssi)
-{
-    if (rssi > k_rssi_threshold)
-    {
-        ESP_LOGI(BLE_TAG, "RSSI value is valid, unlocking door.");
-
-        send_button_event(BLE_BUTTON_EVENT_SINGLE_CLICK); // 在此执行开门操作
-    }
-    else
-    {
-        // ESP_LOGI(BLE_TAG, "RSSI value is invalid, not unlocking door.");
-    }
-}
-
 static void monitor_rssi_task(void *pvParameters)
 {
     rssi_monitor_params_t *params = (rssi_monitor_params_t *)pvParameters;
@@ -818,9 +817,10 @@ static void monitor_rssi_task(void *pvParameters)
                 break;
             }
 
-            if (rssi_task_list[j].ble_rssi_trend == RSSI_TREND_APPROACHING)
+            if (rssi_task_list[j].is_approaching == true && rssi_task_list[j].distance <= 4)
             {
-                unlock_if_rssi_valid(rssi_task_list[j].smoothed_rssi);
+                send_button_event(BLE_BUTTON_EVENT_SINGLE_CLICK); // 在此执行开门操作
+                ESP_LOGI(BLE_TAG, "Approaching and distance is less than 4 meters, open the door.");
             }
             else // 保持不动或者远离
             {
@@ -895,6 +895,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         add_device_to_gap_whitelist(last_connected_bda, last_con_bda_type);
         last_con_bda_type = param->ble_security.auth_cmpl.addr_type;
 
+        // 打印一些信息
         ESP_LOGI(BLE_GAP_TAG, "remote BD_ADDR: %08x%04x",
                  (last_connected_bda[0] << 24) + (last_connected_bda[1] << 16) + (last_connected_bda[2] << 8) + last_connected_bda[3],
                  (last_connected_bda[4] << 8) + last_connected_bda[5]);
@@ -911,17 +912,28 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         print_freedorm_whitelist(&whitelist);
         print_gap_whitelist_size();
 
+        kalman1_init(&kalman1_state_rssi, -70, 1);
+        // kalman2_init(&kalman2_state_rssi, -80, 1);
         esp_ble_gap_start_advertising(&freedorm_pairing_adv_params);
 
         break;
     case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT:
         int j = find_i_in_rssi_task_list(param->read_rssi_cmpl.remote_addr);
 
-        rssi_task_list[j].smoothed_rssi = calculate_sliding_average(param->read_rssi_cmpl.rssi, param->read_rssi_cmpl.remote_addr);
-        ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, smoothed RSSI of the remote device %d: %d", j, rssi_task_list[j].smoothed_rssi);
-        rssi_task_list[j].ble_rssi_trend = evaluate_rssi_trend_regression(rssi_task_list[j].smoothed_rssi, param->read_rssi_cmpl.remote_addr);
+        rssi_task_list[j].smoothed_rssi = kalman1_filter(&kalman1_state_rssi, param->read_rssi_cmpl.rssi);
+        // ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, smoothed RSSI of the remote device %d: %d", j, rssi_task_list[j].smoothed_rssi);
+        rssi_task_list[j].distance = rssi_to_distance(rssi_task_list[j].smoothed_rssi, RSSI_AT_1M, RSSI_PATH_LOSS_EXPONENT);
 
-        ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, RSSI of the remote device %d: %d RSSI trend: %d", j, param->read_rssi_cmpl.rssi, rssi_task_list[j].ble_rssi_trend);
+        // 更新distance_history，每个往后移动一位，最后一位为新的distance
+        for (int i = RSSI_SAMPLE_COUNT - 1; i > 0; i--)
+        {
+            rssi_task_list[j].distance_history[i] = rssi_task_list[j].distance_history[i - 1];
+        }
+        rssi_task_list[j].distance_history[0] = rssi_task_list[j].distance;
+
+        ESP_LOGI(BLE_GAP_TAG, "ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT, distance of the remote device %d: %.2f", j, rssi_task_list[j].distance);
+        rssi_task_list[j].is_approaching = is_approaching(rssi_task_list[j].distance_history, RSSI_SAMPLE_COUNT);
+        ESP_LOGI(BLE_GAP_TAG, "Is approaching: %d", rssi_task_list[j].is_approaching);
 
         break;
 
@@ -1116,6 +1128,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                 break;
             }
         }
+
+        // 重置 Kalman 滤波器状态，为下一次连接做准备
+        memset(&kalman1_state_rssi, 0, sizeof(kalman1_state));
+
         ESP_LOGI(BLE_GATT_TAG, "Device disconnected, restarting advertising...");
 
         // vTaskDelay(pdMS_TO_TICKS(5 * 1000));

@@ -575,8 +575,6 @@ static void ws2812b_led_set_color_all(ws2812b_color_rgb_t rgb_color, uint16_t ti
             return;
         }
     }
-
-    ESP_LOGI(TAG, "Set color all done.");
 }
 
 static void ws2812b_led_rainbow_all(void)
