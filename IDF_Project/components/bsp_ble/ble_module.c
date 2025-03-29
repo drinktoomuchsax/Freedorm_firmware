@@ -76,7 +76,7 @@ static uint16_t hid_conn_id = 0;
 
 // 对于APPLE设备，蓝牙设备名称不能带有空 格、下划_线、横杠-、括号()、点·、斜杠/
 // 对于APPLE设备，蓝牙设备名称可以带有
-#define FREEDORM_DEVICE_NAME "FreedormProSB76" 
+#define FREEDORM_DEVICE_NAME "FreedormPro1976" 
 
 // UUID 定义
 #define SERVICE_UUID 0xFF69
