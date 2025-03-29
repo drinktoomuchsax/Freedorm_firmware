@@ -46,9 +46,9 @@
 #include "time_sync.h"
 
 /* Constants that aren't configurable in menuconfig */
-#define WEB_SERVER "www.howsmyssl.com"
+#define WEB_SERVER "cas.sustech.edu.cn"
 #define WEB_PORT "443"
-#define WEB_URL "https://www.howsmyssl.com/a/check"
+#define WEB_URL "https://cas.sustech.edu.cn/cas/login?service=http%3A%2F%2F172.16.16.20%3A803%2Fsustc_cas.php"
 
 #define SERVER_URL_MAX_SZ 256
 
